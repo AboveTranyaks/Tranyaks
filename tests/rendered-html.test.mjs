@@ -107,3 +107,16 @@ test("contains rotating daily challenges and cooperative room systems", async ()
   assert.match(styles, /\.network-lobby/);
   assert.match(styles, /\.coop-hud/);
 });
+
+test("keeps pause controls readable and daily rewards accessible", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /Награды за серию/);
+  assert.match(source, /Заходите в игру несколько дней подряд/);
+  assert.match(styles, /\.pause-card \.soft-btn/);
+  assert.match(styles, /\.tablet-content[\s\S]*min-height:\s*0/);
+  assert.match(styles, /\.streak-roadmap > p/);
+});

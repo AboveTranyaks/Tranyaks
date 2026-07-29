@@ -3459,6 +3459,7 @@ export default function SecurityConsoleGame() {
               </div> : <div className="daily-challenges-page">
                 <header><div><small>Ежедневник менеджера</small><h1>Четыре дела на сегодня</h1><p>Испытания обновляются по реальному календарю и не накапливаются.</p></div><div className="daily-streak"><b>🔥 Серия: {dailyChallenges.streakCount} дней</b><span>Обновление через {dailyResetLabel}</span></div></header>
                 <div className="daily-bonus-progress"><span>Ежедневная премия: выполнить 3 из 4</span><b>{dailyChallenges.activeChallenges.filter((challenge) => challenge.claimed).length} / 3</b><i><em style={{ width: `${Math.min(100, dailyChallenges.activeChallenges.filter((challenge) => challenge.claimed).length / 3 * 100)}%` }} /></i><small>{dailyChallenges.bonusClaimed ? "Конверт с премией получен: +1 000 ₽ и +50 репутации" : "Награда выдаётся вместе с третьим забранным испытанием"}</small></div>
+                <div className="streak-roadmap"><h3>Награды за серию</h3><p>Заходите в игру несколько дней подряд — полученные награды сохраняются в профиле.</p>{[{ d: 3, r: "Кружка «Лучший менеджер»" }, { d: 7, r: "Наклейки «Пламя»" }, { d: 14, r: "Костюм «Ветеран»" }, { d: 30, r: "Золотой значок · +5% дохода" }].map((reward) => <div className={dailyChallenges.streakCount >= reward.d ? "done" : ""} key={reward.d}><b>{reward.d} дней</b><span>{reward.r}</span></div>)}</div>
                 <div className="daily-challenge-grid">
                   {dailyChallenges.activeChallenges.map((challenge) => {
                     const definition = DAILY_CHALLENGES.find((item) => item.id === challenge.id)!;
@@ -3473,7 +3474,6 @@ export default function SecurityConsoleGame() {
                     </article>;
                   })}
                 </div>
-                <div className="streak-roadmap"><h3>Награды за серию</h3>{[{ d: 3, r: "Кружка «Лучший менеджер»" }, { d: 7, r: "Наклейки «Пламя»" }, { d: 14, r: "Костюм «Ветеран»" }, { d: 30, r: "Золотой значок · +5% дохода" }].map((reward) => <div className={dailyChallenges.streakCount >= reward.d ? "done" : ""} key={reward.d}><b>{reward.d} дней</b><span>{reward.r}</span></div>)}</div>
               </div>}
               </>}
               {tabletTab === "wardrobe" && <>
