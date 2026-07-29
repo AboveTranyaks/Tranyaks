@@ -71,7 +71,7 @@ test("contains quests, expanded economy, districts, and fleet progression", asyn
   assert.match(source, /map-quest-edge/);
   assert.match(source, /createAlarmEvent/);
   assert.match(source, /alarmSeconds/);
-  assert.match(source, /window\.confirm\("Начать заново/);
+  assert.match(source, /window\.confirm\("Сбросить игру полностью/);
   assert.match(source, /tabletTab === "quests"/);
   assert.match(source, /const DISTRICTS/);
   assert.match(source, /const SECURITY_OBJECTS/);
@@ -87,6 +87,26 @@ test("contains quests, expanded economy, districts, and fleet progression", asyn
   assert.match(styles, /\.vehicle-shop-grid/);
   assert.match(styles, /\.vehicle-service-panel/);
   assert.match(styles, /\.player-shop-grid/);
+});
+
+test("contains complete reset, safe NPC respawn, map routing, and corrected walking speed", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /const FullResetAndRestart/);
+  assert.match(source, /clearGameStorage\(localStorage\)/);
+  assert.match(source, /clearGameStorage\(sessionStorage\)/);
+  assert.match(source, /networkChannelRef\.current\?\.close\(\)/);
+  assert.match(source, /residentsFromSave\(save: SaveData\)/);
+  assert.match(source, /DEFAULT_CAR_POSITION/);
+  assert.match(source, /const baseSpeed = jogging \? 3\.5 : fastWalking \? 2\.5 : 1\.4/);
+  assert.match(source, /mapRouteStyle/);
+  assert.match(source, /minimap-distance/);
+  assert.match(styles, /\.world-route\.active[\s\S]*transform-origin:\s*0 50%/);
+  assert.match(styles, /\.minimap-distance/);
+  assert.match(styles, /\.full-reset-panel/);
 });
 
 test("contains rotating daily challenges and cooperative room systems", async () => {

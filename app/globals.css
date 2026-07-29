@@ -395,11 +395,11 @@ kbd {
   position: absolute;
   right: 24px;
   bottom: 24px;
-  width: 170px;
-  height: 170px;
+  width: 220px;
+  height: 150px;
   overflow: hidden;
   border: 3px solid rgba(255, 255, 255, 0.86);
-  border-radius: 50%;
+  border-radius: 18px;
   background: #8eaf75;
   box-shadow: 0 12px 36px rgba(19, 37, 29, 0.26);
 }
@@ -1114,6 +1114,41 @@ kbd {
   color: #dff09a;
   font-size: 10px;
   font-weight: 900;
+}
+
+.minimap-distance {
+  position: absolute;
+  z-index: 20;
+  right: 7px;
+  bottom: 7px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  color: #fff;
+  background: rgba(27, 49, 41, 0.86);
+  font-size: 10px;
+  font-weight: 900;
+  box-shadow: 0 3px 10px rgba(18, 34, 27, 0.22);
+}
+
+.map-waypoint-mini,
+.map-waypoint-edge {
+  position: absolute;
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  color: #fff;
+  background: #e86449;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.map-waypoint-edge {
+  background: #d9523a;
 }
 
 .wardrobe-grid {
@@ -2191,11 +2226,11 @@ kbd {
 .world-route.active {
   position: absolute;
   z-index: 3;
-  left: 10%;
-  right: 10%;
-  top: 50%;
+  height: 0;
   border-top: 3px dashed #e86449;
   opacity: 0.7;
+  transform-origin: 0 50%;
+  pointer-events: none;
 }
 
 @keyframes map-pulse {
@@ -2393,6 +2428,23 @@ kbd {
 .save-card button { padding: 8px 10px; border: 0; border-radius: 8px; background: #315c45; color: white; cursor: pointer; }
 .save-card button.danger { background: #b85c4f; }
 
+.full-reset-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #dfb4aa;
+  border-radius: 14px;
+  color: #4b2d27;
+  background: #f8e7e1;
+}
+
+.full-reset-panel div { display: grid; gap: 4px; }
+.full-reset-panel span { color: #76544d; font-size: 11px; line-height: 1.45; }
+.full-reset-panel button { flex: 0 0 auto; padding: 10px 13px; border: 0; border-radius: 9px; color: #fff; background: #b85c4f; cursor: pointer; font-weight: 800; }
+
 .pause-overlay {
   z-index: 50;
   display: grid;
@@ -2450,8 +2502,8 @@ kbd {
   }
 
   .minimap {
-    width: 125px;
-    height: 125px;
+    width: 160px;
+    height: 110px;
   }
 
   .controls-hint {
