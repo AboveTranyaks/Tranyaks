@@ -9,8 +9,10 @@ const pagesConfigUrl = new URL("../vite.pages.config.ts", import.meta.url);
 test("contains the expanded playable world and movement systems", async () => {
   const source = await readFile(sourceUrl, "utf8");
 
-  assert.match(source, /addNeighbourhood\(0,\s*40,\s*10\)/);
-  assert.match(source, /addNeighbourhood\(4000,\s*50,\s*50\)/);
+  assert.match(source, /addNeighbourhood\(0,\s*15,\s*10\)/);
+  assert.match(source, /addNeighbourhood\(1350,\s*25,\s*25\)/);
+  assert.match(source, /addNeighbourhood\(2700,\s*25,\s*50\)/);
+  assert.match(source, /addNeighbourhood\(4000,\s*25,\s*75\)/);
   assert.match(source, /function surfaceAt/);
   assert.match(source, /fastWalkUntil/);
   assert.match(source, /const energyCost = \(jogging \? 1\.5 : fastWalking \? 0\.5 : 0\.2\)/);
@@ -55,4 +57,53 @@ test("contains separate map and tablet controls, profiles, saves, and offline ra
   assert.match(styles, /\.full-map-overlay/);
   assert.match(styles, /\.save-grid/);
   assert.match(styles, /\.leaderboard-table/);
+});
+
+test("contains quests, expanded economy, districts, and fleet progression", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /const QUESTS/);
+  assert.match(source, /quest_open_office/);
+  assert.match(source, /acceptQuest/);
+  assert.match(source, /map-quest-edge/);
+  assert.match(source, /createAlarmEvent/);
+  assert.match(source, /alarmSeconds/);
+  assert.match(source, /window\.confirm\("Начать заново/);
+  assert.match(source, /tabletTab === "quests"/);
+  assert.match(source, /const DISTRICTS/);
+  assert.match(source, /const SECURITY_OBJECTS/);
+  assert.match(source, /const VEHICLES/);
+  assert.match(source, /usedPrice/);
+  assert.match(source, /tradeInCurrentVehicle/);
+  assert.match(source, /serviceVehicle/);
+  assert.match(source, /buyStoreItem/);
+  assert.match(source, /СЕЛО ПЕРОВОРЕЧЕНСКОЕ/);
+  assert.match(styles, /\.quest-journal/);
+  assert.match(styles, /\.quest-offer/);
+  assert.match(styles, /\.minimap-layer/);
+  assert.match(styles, /\.vehicle-shop-grid/);
+  assert.match(styles, /\.vehicle-service-panel/);
+  assert.match(styles, /\.player-shop-grid/);
+});
+
+test("contains rotating daily challenges and cooperative room systems", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /type DailyChallengeState/);
+  assert.match(source, /const DAILY_CHALLENGES/);
+  assert.match(source, /createDailyChallenges/);
+  assert.match(source, /claimDailyChallenge/);
+  assert.match(source, /new BroadcastChannel/);
+  assert.match(source, /networkMaxPlayers/);
+  assert.match(source, /sendNetworkChat/);
+  assert.match(source, /remoteMeshes/);
+  assert.match(styles, /\.daily-challenge-grid/);
+  assert.match(styles, /\.network-lobby/);
+  assert.match(styles, /\.coop-hud/);
 });
