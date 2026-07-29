@@ -361,6 +361,31 @@ kbd {
   box-shadow: 0 2px 7px rgba(0, 0, 0, 0.3);
 }
 
+.map-key {
+  position: absolute;
+  z-index: 3;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid white;
+  border-radius: 5px;
+  background: #2f5945;
+  color: white;
+  font-size: 7px;
+  font-weight: 900;
+  box-shadow: 0 2px 5px rgba(23, 45, 36, 0.3);
+}
+
+.map-key-nature {
+  background: #5c9eae;
+}
+
+.map-key-village {
+  background: #d87752;
+}
+
 .compass-n {
   position: absolute;
   top: 8px;
@@ -1026,6 +1051,272 @@ kbd {
   font-size: 24px;
 }
 
+.tablet-map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 165px;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.world-map {
+  position: relative;
+  min-height: 365px;
+  overflow: hidden;
+  border: 1px solid #c7d0b8;
+  border-radius: 20px;
+  background: #9fbc78;
+  box-shadow: inset 0 0 0 5px rgba(255, 255, 255, 0.2);
+}
+
+.world-map-field {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 43%;
+  opacity: 0.42;
+  background:
+    repeating-linear-gradient(102deg, transparent 0 18px, rgba(68, 104, 51, 0.22) 19px 21px),
+    #a9c985;
+}
+
+.world-map-field.north {
+  top: 0;
+}
+
+.world-map-field.south {
+  bottom: 0;
+  transform: scaleY(-1);
+}
+
+.world-map-road {
+  position: absolute;
+  left: 3%;
+  right: 3%;
+  top: calc(50% - 8px);
+  height: 16px;
+  border-top: 2px solid rgba(255, 255, 255, 0.65);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.65);
+  background: #c1b59d;
+}
+
+.world-map-road::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 0;
+  right: 0;
+  border-top: 2px dashed #f3eddb;
+}
+
+.world-map-cross {
+  position: absolute;
+  top: 13%;
+  width: 10px;
+  height: 74%;
+  background: #c1b59d;
+}
+
+.world-map-cross.first {
+  left: 8%;
+}
+
+.world-map-cross.second {
+  right: 8%;
+}
+
+.world-map-river {
+  position: absolute;
+  left: -1%;
+  top: 12%;
+  width: 18%;
+  height: 19px;
+  border-radius: 50%;
+  background: #6aaeba;
+  transform: rotate(-8deg);
+  box-shadow: 25px 9px 0 -5px #6aaeba;
+}
+
+.world-village {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: rgba(34, 68, 54, 0.85);
+  color: white;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.world-village b {
+  font-size: 10px;
+}
+
+.world-village small {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 7px;
+}
+
+.world-village.first {
+  left: 8%;
+  bottom: 8px;
+}
+
+.world-village.second {
+  right: 8px;
+  top: 8px;
+  transform: none;
+}
+
+.world-house,
+.world-point,
+.world-player {
+  position: absolute;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+}
+
+.world-house {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid white;
+  border-radius: 2px;
+  background: #d99465;
+}
+
+.world-house.signed {
+  background: #cce86b;
+  box-shadow: 0 0 0 3px rgba(204, 232, 107, 0.24);
+}
+
+.world-point {
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  border: 2px solid white;
+  border-radius: 7px;
+  background: #315c45;
+  color: white;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  box-shadow: 0 4px 9px rgba(35, 68, 54, 0.3);
+}
+
+.world-point-nature {
+  background: #5c9eae;
+}
+
+.world-point-village {
+  background: #d87752;
+}
+
+.world-player {
+  z-index: 7;
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border: 3px solid white;
+  border-radius: 50% 50% 50% 8px;
+  background: #e86449;
+  color: white;
+  font-size: 10px;
+  font-weight: 900;
+  box-shadow: 0 5px 13px rgba(73, 38, 31, 0.35);
+  transition: left 0.12s linear, top 0.12s linear;
+}
+
+.map-legend {
+  padding: 15px 13px;
+  border: 1px solid #d3d8c7;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.map-legend h3 {
+  margin: 0 0 14px;
+  color: #315c45;
+  font-family: Georgia, serif;
+}
+
+.map-legend > div {
+  display: grid;
+  grid-template-columns: 23px 1fr;
+  gap: 8px;
+  align-items: center;
+  margin: 9px 0;
+  color: #68766e;
+  font-size: 9px;
+}
+
+.map-legend i {
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #315c45;
+  color: white;
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.map-legend .legend-player {
+  border-radius: 50%;
+  background: #e86449;
+}
+
+.map-legend .legend-house {
+  width: 11px;
+  height: 11px;
+  margin-left: 4px;
+  border: 2px solid white;
+  border-radius: 3px;
+  background: #d99465;
+  box-shadow: 0 0 0 1px #c9cdbf;
+}
+
+.map-legend .legend-house.signed {
+  background: #cce86b;
+}
+
+.map-legend .legend-road {
+  height: 5px;
+  margin-left: 1px;
+  border-radius: 2px;
+  background: #c1b59d;
+}
+
+.map-legend > small {
+  display: block;
+  margin-top: 20px;
+  padding-top: 13px;
+  border-top: 1px solid #d7dccb;
+  color: #829087;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.map-progress {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 13px;
+  border-radius: 12px;
+  background: #315c45;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 10px;
+}
+
+.map-progress b {
+  color: #cce86b;
+}
+
 .office {
   display: grid;
   grid-template-columns: 250px 1fr;
@@ -1337,6 +1628,28 @@ kbd {
 
   .tablet-sidebar {
     display: none;
+  }
+
+  .tablet-content {
+    padding: 20px;
+  }
+
+  .tablet-map-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .world-map {
+    min-height: 330px;
+  }
+
+  .map-legend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .map-legend h3,
+  .map-legend > small {
+    grid-column: 1 / -1;
   }
 
   .office {
