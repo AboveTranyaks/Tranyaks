@@ -74,8 +74,18 @@ const REPLIES: { kind: ReplyKind; label: string }[] = [
   { kind: "pressure", label: "Откладывать опасно: следующая тревога может быть уже этой ночью." },
 ];
 
+const WORLD_KEY_POINTS = [
+  { id: "office", label: "Офис охраны", short: "О", x: 92, z: -18, kind: "office" },
+  { id: "shop", label: "Магазин", short: "М", x: 3, z: -22, kind: "service" },
+  { id: "school", label: "Школа", short: "Ш", x: -72, z: 34, kind: "service" },
+  { id: "river", label: "Река Кочеты", short: "Р", x: 0, z: 180, kind: "nature" },
+  { id: "dinskaya", label: "Центр станицы Динской", short: "Д", x: 4000, z: -24, kind: "village" },
+] as const;
+
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const mapPos = (value: number, extent: number) => `${50 + (value / extent) * 44}%`;
+const worldMapX = (x: number) => `${clamp(((x + 180) / 4360) * 100, 2, 98)}%`;
+const worldMapZ = (z: number) => `${clamp(50 - (z / 390) * 72, 8, 92)}%`;
 
 function readSave(): SaveData {
   if (typeof window === "undefined") {
@@ -129,6 +139,54 @@ function makeTree(scene: THREE.Object3D, x: number, z: number, scale = 1) {
   scene.add(group);
 }
 
+function makeFieldVegetation(scene: THREE.Object3D) {
+  const dummy = new THREE.Object3D();
+  const grassGeometry = new THREE.ConeGeometry(0.16, 0.75, 4);
+  const grass = new THREE.InstancedMesh(grassGeometry, mat(0x6f984f), 1800);
+  grass.receiveShadow = true;
+  for (let i = 0; i < 1800; i++) {
+    const x = -175 + ((i * 73) % 4350);
+    const side = i % 2 === 0 ? -1 : 1;
+    const z = side * (16 + ((i * 47) % 172));
+    dummy.position.set(x, 0.34, z);
+    const insideVillage = Math.abs(x) < 190 || Math.abs(x - 4000) < 190;
+    const scale = insideVillage ? 0.001 : 0.55 + ((i * 19) % 9) / 12;
+    dummy.scale.set(scale, scale, scale);
+    dummy.rotation.y = (i * 0.73) % Math.PI;
+    dummy.updateMatrix();
+    grass.setMatrixAt(i, dummy.matrix);
+  }
+  grass.instanceMatrix.needsUpdate = true;
+  scene.add(grass);
+
+  const trunkGeometry = new THREE.CylinderGeometry(0.3, 0.46, 2.8, 6);
+  const crownGeometry = new THREE.IcosahedronGeometry(1.85, 0);
+  const trunks = new THREE.InstancedMesh(trunkGeometry, mat(0x74583e), 240);
+  const crowns = new THREE.InstancedMesh(crownGeometry, mat(0x5f8951), 240);
+  trunks.castShadow = true;
+  crowns.castShadow = true;
+  for (let i = 0; i < 240; i++) {
+    const x = -160 + ((i * 83) % 4320);
+    const side = i % 2 === 0 ? -1 : 1;
+    const distance = 28 + ((i * 41) % (side > 0 ? 115 : 145));
+    const z = side * distance;
+    const insideVillage = Math.abs(x) < 205 || Math.abs(x - 4000) < 205;
+    const scale = insideVillage ? 0.001 : 0.72 + ((i * 13) % 8) / 16;
+    dummy.position.set(x, 1.4 * scale, z);
+    dummy.scale.set(scale, scale, scale);
+    dummy.rotation.set(0, (i * 0.49) % Math.PI, 0);
+    dummy.updateMatrix();
+    trunks.setMatrixAt(i, dummy.matrix);
+    dummy.position.y = 4.15 * scale;
+    dummy.scale.set(scale, scale * 1.18, scale);
+    dummy.updateMatrix();
+    crowns.setMatrixAt(i, dummy.matrix);
+  }
+  trunks.instanceMatrix.needsUpdate = true;
+  crowns.instanceMatrix.needsUpdate = true;
+  scene.add(trunks, crowns);
+}
+
 function makeHouse(
   scene: THREE.Object3D,
   x: number,
@@ -174,13 +232,49 @@ function makePerson(color: number) {
   body.position.y = 2.65;
   const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.67, 1), mat(0xe2b883));
   head.position.y = 4.15;
+  const hair = new THREE.Mesh(
+    new THREE.SphereGeometry(0.66, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2),
+    mat(0x50392f),
+  );
+  hair.position.y = 4.48;
+  hair.scale.set(1.02, 0.56, 1.02);
+  const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.075, 6, 4), mat(0x26302d));
+  leftEye.position.set(-0.22, 4.25, 0.61);
+  const rightEye = leftEye.clone();
+  rightEye.position.x = 0.22;
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.25, 5), mat(0xd3a474));
+  nose.position.set(0, 4.08, 0.68);
+  nose.rotation.x = Math.PI / 2;
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.045, 0.035), mat(0x8f4d48));
+  mouth.position.set(0, 3.91, 0.64);
   const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 1.55, 6), mat(0xe2b883));
   leftArm.position.set(-0.95, 2.7, 0);
   leftArm.name = "leftArm";
   const rightArm = leftArm.clone();
   rightArm.position.x = 0.95;
   rightArm.name = "rightArm";
-  group.add(leftLeg, rightLeg, body, head, leftArm, rightArm);
+  const shirtFront = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.35, 0.12), mat(color, 0.78));
+  shirtFront.position.set(0, 2.72, 0.78);
+  const leftShoe = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.3, 0.82), mat(0x292d2b));
+  leftShoe.position.set(-0.33, 0.15, 0.14);
+  const rightShoe = leftShoe.clone();
+  rightShoe.position.x = 0.33;
+  group.add(
+    leftLeg,
+    rightLeg,
+    leftShoe,
+    rightShoe,
+    body,
+    shirtFront,
+    head,
+    hair,
+    leftEye,
+    rightEye,
+    nose,
+    mouth,
+    leftArm,
+    rightArm,
+  );
   group.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;
   });
@@ -328,6 +422,7 @@ export default function SecurityConsoleGame() {
     yaw: number;
     pitch: number;
     zoom: number;
+    cameraInputAt: number;
   }>({
     keys: new Set(),
     driving: false,
@@ -340,6 +435,7 @@ export default function SecurityConsoleGame() {
     yaw: Math.PI,
     pitch: 0.52,
     zoom: 14,
+    cameraInputAt: 0,
   });
 
   const [mode, setMode] = useState<GameMode>("intro");
@@ -452,6 +548,7 @@ export default function SecurityConsoleGame() {
     ground.position.x = 1950;
     ground.receiveShadow = true;
     scene.add(ground);
+    makeFieldVegetation(scene);
 
     // Four-kilometre route and straight centre markings.
     box(scene, [4300, 0.18, 14], [1950, 0.1, 0], 0xa9a49a);
@@ -619,7 +716,7 @@ export default function SecurityConsoleGame() {
       box(scene, [0.22, 4, 0.22], [x, 2, z - 3.5], 0x33423d);
       box(scene, [0.22, 4, 0.22], [x, 2, z + 3.5], 0x33423d);
     };
-    makeRoadSign("ДИНСКАЯ 4 КМ", 205, -12);
+    makeRoadSign("ДИНСКАЯ", 205, -12);
     makeRoadSign("ПЕРВОРЕЧЕНСКОЕ 4 КМ", 3795, -12, true);
 
     const player = makeHero();
@@ -703,6 +800,8 @@ export default function SecurityConsoleGame() {
         if (!focus) return;
         if (!engine.driving && engine.car && focus.position.distanceTo(engine.car.position) < 5.2) {
           engine.driving = true;
+          engine.yaw = car.rotation.y + Math.PI;
+          engine.cameraInputAt = performance.now();
           player.visible = false;
           setDriving(true);
           flash("Вы сели в старый седан");
@@ -755,12 +854,14 @@ export default function SecurityConsoleGame() {
     const onMouseDown = (e: MouseEvent) => {
       if (e.button === 2) {
         mouseDown = true;
+        engine.cameraInputAt = performance.now();
         lastMouseX = e.clientX;
         lastMouseY = e.clientY;
       }
     };
     const onMouseMove = (e: MouseEvent) => {
       if (!mouseDown) return;
+      engine.cameraInputAt = performance.now();
       engine.yaw -= (e.clientX - lastMouseX) * 0.006;
       engine.pitch = clamp(engine.pitch + (e.clientY - lastMouseY) * 0.004, 0.18, 1.02);
       lastMouseX = e.clientX;
@@ -829,13 +930,15 @@ export default function SecurityConsoleGame() {
         } else {
           engine.carSpeed *= -0.16;
         }
-        engine.yaw = THREE.MathUtils.lerp(engine.yaw, car.rotation.y + Math.PI, dt * 1.2);
+        if (!mouseDown && now - engine.cameraInputAt > 1500) {
+          engine.yaw = THREE.MathUtils.lerp(engine.yaw, car.rotation.y + Math.PI, 1 - Math.pow(0.06, dt));
+        }
       } else if (canMove) {
         const forward = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
         const side = (engine.keys.has("right") ? 1 : 0) - (engine.keys.has("left") ? 1 : 0);
         const moving = Math.abs(forward) + Math.abs(side) > 0;
         const sprinting = moving && engine.keys.has("sprint") && energyRef.current > 0.5;
-        const speed = sprinting ? 5 : energyRef.current <= 0 ? 1.25 : 2;
+        const speed = sprinting ? 5.8 : energyRef.current <= 0 ? 1.55 : 2.7;
         if (moving) {
           const angle = engine.yaw;
           const length = Math.max(1, Math.hypot(forward, side));
@@ -1043,7 +1146,12 @@ export default function SecurityConsoleGame() {
     const minute = Math.floor((gameTime - hour) * 60);
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   }, [gameTime]);
-  const mapCenterX = locationName === "станица Динская" ? 4000 : 0;
+  const mapCenterX =
+    playerPos.x < 220
+      ? 0
+      : playerPos.x > 3780
+        ? 4000
+        : Math.round(playerPos.x / 300) * 300;
 
   return (
     <main className="game-shell" aria-label="Игра Пульт охраны">
@@ -1071,7 +1179,11 @@ export default function SecurityConsoleGame() {
             <div className="energy-track"><div className="energy-fill" style={{ width: `${energy}%` }} /></div>
           </div>
           <div className="controls-hint">
-            <kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>ПКМ</kbd> камера <kbd>Tab</kbd> планшет
+            {driving ? (
+              <><kbd>WASD</kbd> вести <kbd>Space</kbd> ручник <kbd>ПКМ</kbd> осмотреться <kbd>E</kbd> выйти</>
+            ) : (
+              <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>ПКМ</kbd> камера <kbd>Tab</kbd> планшет</>
+            )}
           </div>
           <div className="route-card">
             <b>{locationName}</b>
@@ -1079,16 +1191,26 @@ export default function SecurityConsoleGame() {
           </div>
           <div className="minimap" aria-label="Миникарта">
             <span className="compass-n">С</span>
-            {locationName === "Первореченское" && <div className="map-river" />}
+            {Math.abs(mapCenterX) < 240 && <div className="map-river" />}
             <div className="map-road" />
-            <div className="map-road vertical" />
-            {locationName === "Первореченское" && residents.map((r) => (
-              <span key={`h-${r.id}`} className={`map-home ${r.signed ? "signed" : ""}`} style={{ left: mapPos(r.x, 120), top: mapPos(r.z, 90) }} />
+            {(Math.abs(mapCenterX) < 240 || Math.abs(mapCenterX - 4000) < 240) && <div className="map-road vertical" />}
+            {Math.abs(mapCenterX) < 240 && residents.map((r) => (
+              <span key={`h-${r.id}`} className={`map-home ${r.signed ? "signed" : ""}`} style={{ left: mapPos(r.x - mapCenterX, 180), top: mapPos(-r.z, 190) }} />
             ))}
-            {locationName === "Первореченское" && residents.filter((r) => !r.signed).map((r) => (
-              <span key={`n-${r.id}`} className="map-npc" style={{ left: mapPos(r.x + 5, 120), top: mapPos(r.z + (r.z > 0 ? -5 : 5), 90) }} />
+            {Math.abs(mapCenterX) < 240 && residents.filter((r) => !r.signed).map((r) => (
+              <span key={`n-${r.id}`} className="map-npc" style={{ left: mapPos(r.x + 5 - mapCenterX, 180), top: mapPos(-(r.z + (r.z > 0 ? -5 : 5)), 190) }} />
             ))}
-            <span className="map-player" style={{ left: mapPos(playerPos.x - mapCenterX, 180), top: mapPos(playerPos.z, 190) }} />
+            {WORLD_KEY_POINTS.filter((point) => Math.abs(point.x - mapCenterX) < 180).map((point) => (
+              <span
+                key={`key-${point.id}`}
+                className={`map-key map-key-${point.kind}`}
+                title={point.label}
+                style={{ left: mapPos(point.x - mapCenterX, 180), top: mapPos(-point.z, 190) }}
+              >
+                {point.short}
+              </span>
+            ))}
+            <span className="map-player" style={{ left: mapPos(playerPos.x - mapCenterX, 180), top: mapPos(-playerPos.z, 190) }} />
           </div>
           {mode === "world" && (nearest || (driving && Math.abs(engineRef.current.carSpeed) < 1.2)) && (
             <div className="interaction-prompt">
@@ -1182,7 +1304,7 @@ export default function SecurityConsoleGame() {
               <button className={`tablet-tab ${tabletTab === "hero" ? "active" : ""}`} onClick={() => setTabletTab("hero")}>Алексей и навыки</button>
               <button className={`tablet-tab ${tabletTab === "clients" ? "active" : ""}`} onClick={() => setTabletTab("clients")}>Жители и договоры</button>
               <button className={`tablet-tab ${tabletTab === "finance" ? "active" : ""}`} onClick={() => setTabletTab("finance")}>Финансы</button>
-              <button className={`tablet-tab ${tabletTab === "map" ? "active" : ""}`} onClick={() => setTabletTab("map")}>Смена и прогресс</button>
+              <button className={`tablet-tab ${tabletTab === "map" ? "active" : ""}`} onClick={() => setTabletTab("map")}>Карта и смена</button>
               <button className="tablet-tab tablet-close" onClick={() => setMode("world")}>← Вернуться в игру</button>
             </aside>
             <div className="tablet-content">
@@ -1231,14 +1353,59 @@ export default function SecurityConsoleGame() {
                 </div>
               </>}
               {tabletTab === "map" && <>
-                <h1>Открытие пульта</h1>
-                <p>Пульт централизованного наблюдения откроется после 10 активных договоров.</p>
-                <div className="finance-row">
-                  <div className="finance-box"><span>Прогресс</span><b>{signedCount} / 10</b></div>
-                  <div className="finance-box"><span>Осталось</span><b>{Math.max(0, 10 - signedCount)}</b></div>
-                  <div className="finance-box"><span>Статус</span><b>{signedCount >= 10 ? "Открыт" : "Закрыт"}</b></div>
+                <h1>Карта района</h1>
+                <p>Первореченское и станица Динская · маршрут 4 км. Положение Алексея обновляется во время движения.</p>
+                <div className="tablet-map-layout">
+                  <div className="world-map" aria-label="Большая карта района">
+                    <div className="world-map-field north" />
+                    <div className="world-map-field south" />
+                    <div className="world-map-road" />
+                    <div className="world-map-cross first" />
+                    <div className="world-map-cross second" />
+                    <div className="world-map-river" />
+                    <div className="world-village first"><b>Первореченское</b><small>офис · школа · магазин</small></div>
+                    <div className="world-village second"><b>станица Динская</b><small>центр · школа · магазин</small></div>
+                    {residents.map((resident) => (
+                      <span
+                        key={`tablet-house-${resident.id}`}
+                        className={`world-house ${resident.signed ? "signed" : ""}`}
+                        title={`${resident.address}${resident.signed ? " · охраняется" : " · потенциальный клиент"}`}
+                        style={{ left: worldMapX(resident.x), top: worldMapZ(resident.z) }}
+                      />
+                    ))}
+                    {WORLD_KEY_POINTS.map((point) => (
+                      <span
+                        key={`tablet-point-${point.id}`}
+                        className={`world-point world-point-${point.kind}`}
+                        title={point.label}
+                        style={{ left: worldMapX(point.x), top: worldMapZ(point.z) }}
+                      >
+                        {point.short}
+                      </span>
+                    ))}
+                    <span
+                      className="world-player"
+                      title="Алексей"
+                      style={{ left: worldMapX(playerPos.x), top: worldMapZ(playerPos.z) }}
+                    >
+                      А
+                    </span>
+                  </div>
+                  <aside className="map-legend">
+                    <h3>Легенда</h3>
+                    <div><i className="legend-player">А</i><span>Алексей</span></div>
+                    <div><i className="legend-point">О</i><span>Ключевая точка</span></div>
+                    <div><i className="legend-house" /><span>Дом клиента</span></div>
+                    <div><i className="legend-house signed" /><span>Дом на охране</span></div>
+                    <div><i className="legend-road" /><span>Основная дорога</span></div>
+                    <small>Текущее место:<br /><b>{locationName}</b></small>
+                  </aside>
                 </div>
-                <div style={{ marginTop: 22, display: "flex", gap: 10 }}>
+                <div className="map-progress">
+                  <span>Открытие пульта: <b>{signedCount} / 10 договоров</b></span>
+                  <span>{signedCount >= 10 ? "Пульт открыт" : `Осталось ${Math.max(0, 10 - signedCount)}`}</span>
+                </div>
+                <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
                   <button className="primary-btn" onClick={() => startOffice(false)}>Начать смену на пульте</button>
                   <button className="soft-btn" style={{ color: "#315c45", borderColor: "#bfc8b8" }} onClick={() => startOffice(true)}>Учебная тревога</button>
                 </div>
