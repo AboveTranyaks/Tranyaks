@@ -158,6 +158,73 @@ function makePerson(color: number) {
   return group;
 }
 
+function makeHero() {
+  const hero = new THREE.Group();
+  hero.name = "Алексей";
+
+  const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.52, 1.65, 0.62), mat(0x26394d));
+  leftLeg.position.set(-0.34, 1.05, 0);
+  leftLeg.name = "leftLeg";
+  const rightLeg = leftLeg.clone();
+  rightLeg.position.x = 0.34;
+  rightLeg.name = "rightLeg";
+
+  const leftShoe = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.36, 0.95), mat(0xf0eee7));
+  leftShoe.position.set(-0.34, 0.2, 0.13);
+  const rightShoe = leftShoe.clone();
+  rightShoe.position.x = 0.34;
+
+  const polo = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.88, 1.75, 7), mat(0x315c45));
+  polo.position.y = 2.68;
+  const jacket = new THREE.Mesh(new THREE.BoxGeometry(1.72, 1.62, 0.28), mat(0x425b61));
+  jacket.position.set(0, 2.72, -0.5);
+
+  const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 1.65, 6), mat(0xe2b883));
+  leftArm.position.set(-1.0, 2.7, 0);
+  leftArm.rotation.z = -0.08;
+  leftArm.name = "leftArm";
+  const rightArm = leftArm.clone();
+  rightArm.position.x = 1.0;
+  rightArm.rotation.z = 0.08;
+  rightArm.name = "rightArm";
+
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.3, 0.4, 7), mat(0xe2b883));
+  neck.position.y = 3.72;
+  const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.72, 1), mat(0xe2b883));
+  head.position.y = 4.42;
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x49362e));
+  hair.position.y = 4.66;
+  hair.scale.set(1.02, 0.48, 1.02);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.36, 5), mat(0xd5a879));
+  nose.position.set(0, 4.38, 0.69);
+  nose.rotation.x = Math.PI / 2;
+
+  const tablet = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.02, 0.12), mat(0x26302d));
+  tablet.position.set(0.82, 2.1, -0.5);
+  tablet.rotation.z = -0.18;
+
+  hero.add(leftLeg, rightLeg, leftShoe, rightShoe, polo, jacket, leftArm, rightArm, neck, head, hair, nose, tablet);
+  hero.traverse((object) => {
+    if (object instanceof THREE.Mesh) {
+      object.castShadow = true;
+      object.receiveShadow = true;
+    }
+  });
+  return hero;
+}
+
+function animateHero(hero: THREE.Group, moving: boolean, now: number, sprinting: boolean) {
+  const stride = moving ? Math.sin(now * (sprinting ? 0.018 : 0.012)) * (sprinting ? 0.72 : 0.46) : 0;
+  const leftLeg = hero.getObjectByName("leftLeg");
+  const rightLeg = hero.getObjectByName("rightLeg");
+  const leftArm = hero.getObjectByName("leftArm");
+  const rightArm = hero.getObjectByName("rightArm");
+  if (leftLeg) leftLeg.rotation.x = stride;
+  if (rightLeg) rightLeg.rotation.x = -stride;
+  if (leftArm) leftArm.rotation.x = -stride * 0.72;
+  if (rightArm) rightArm.rotation.x = stride * 0.72;
+}
+
 function makeCar() {
   const group = new THREE.Group();
   const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 6.2), mat(0xc85f4c));
@@ -227,7 +294,7 @@ export default function SecurityConsoleGame() {
   const [npcLine, setNpcLine] = useState("");
   const [toast, setToast] = useState("");
   const [showTariff, setShowTariff] = useState(false);
-  const [tabletTab, setTabletTab] = useState<"clients" | "finance" | "map">("clients");
+  const [tabletTab, setTabletTab] = useState<"hero" | "clients" | "finance" | "map">("hero");
   const [playerPos, setPlayerPos] = useState({ x: -4, z: -2 });
   const [weather, setWeather] = useState<"Ясно" | "Облачно" | "Дождь">("Ясно");
   const [alarm, setAlarm] = useState<null | { type: string; address: string; correct: string }>(null);
@@ -356,6 +423,37 @@ export default function SecurityConsoleGame() {
       box(scene, [13, 0.42, 0.28], [x, 0.5, z + (z > 0 ? -6.4 : 6.4)], 0x806f55);
     });
 
+    // Центр посёлка: магазин, школа, остановка и детская площадка.
+    box(scene, [15, 5.4, 10], [3, 2.7, -22], 0xe0b56f);
+    box(scene, [16.5, 0.65, 11.5], [3, 5.72, -22], 0xa95849);
+    box(scene, [9.5, 0.45, 1.8], [3, 4.35, -16.85], 0xcce86b);
+    box(scene, [2.1, 2.9, 0.25], [3, 1.55, -16.82], 0x6e4c35);
+    box(scene, [2.6, 1.75, 0.25], [-1.2, 3.0, -16.8], 0x9ed4dc);
+    box(scene, [2.6, 1.75, 0.25], [7.2, 3.0, -16.8], 0x9ed4dc);
+
+    box(scene, [23, 6.5, 12], [-72, 3.25, 34], 0xd8cf9b);
+    box(scene, [24.5, 1.3, 13.5], [-72, 7.0, 34], 0x557d68);
+    for (const x of [-79, -74.5, -69.5, -65]) {
+      box(scene, [2.5, 1.9, 0.25], [x, 3.3, 27.9], 0x9ed4dc);
+    }
+
+    box(scene, [7.5, 0.32, 3.2], [-20, 0.18, 30], 0xd2c39e);
+    box(scene, [0.32, 3.4, 0.32], [-23, 1.7, 30], 0x49685a);
+    box(scene, [0.32, 3.4, 0.32], [-17, 1.7, 30], 0x49685a);
+    box(scene, [6.4, 0.3, 0.3], [-20, 3.3, 30], 0x49685a);
+    box(scene, [2.8, 0.25, 1.15], [-20, 1.05, 29], 0xe38b58, 0.12);
+
+    for (let x = -88; x <= 88; x += 22) {
+      const lamp = new THREE.Group();
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 4.6, 6), mat(0x374943));
+      pole.position.y = 2.3;
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.34, 7, 5), mat(0xffd88a));
+      glow.position.y = 4.7;
+      lamp.add(pole, glow);
+      lamp.position.set(x, 0, 7.6 - x * 0.035);
+      scene.add(lamp);
+    }
+
     box(scene, [18, 7, 13], [92, 3.5, -18], 0x446f59);
     box(scene, [8, 1.1, 0.4], [92, 6.2, -11.3], 0xcce86b);
     const officeSign = document.createElement("canvas");
@@ -378,7 +476,7 @@ export default function SecurityConsoleGame() {
     sign.position.set(92, 6.2, -11.08);
     scene.add(sign);
 
-    const player = makePerson(0xcce86b);
+    const player = makeHero();
     player.position.set(-4, 0, -3);
     scene.add(player);
     engine.player = player;
@@ -550,9 +648,11 @@ export default function SecurityConsoleGame() {
           } else {
             energyRef.current = clamp(energyRef.current + dt * 0.22, 0, 100);
           }
+          animateHero(player, true, now, sprinting);
         } else {
           player.position.y = THREE.MathUtils.lerp(player.position.y, 0, dt * 10);
           energyRef.current = clamp(energyRef.current + dt * 0.45, 0, 100);
+          animateHero(player, false, now, false);
         }
       }
 
@@ -722,13 +822,18 @@ export default function SecurityConsoleGame() {
 
   return (
     <main className="game-shell" aria-label="Игра Пульт охраны">
-      <div ref={mountRef} aria-label="Трёхмерный посёлок" />
+      <div className="world-viewport" ref={mountRef} aria-label="Трёхмерный посёлок" />
 
       {mode !== "intro" && mode !== "office" && (
         <div className="hud" aria-hidden={mode !== "world"}>
           <div className="brand">
             <div className="brand-mark">⌂</div>
             <div><strong>Пульт охраны</strong><small>ПервоРеченское</small></div>
+          </div>
+          <div className="hero-card">
+            <div className="hero-avatar">А</div>
+            <div><strong>Алексей</strong><small>Основатель · уровень 1</small></div>
+            <span>Наблюдательность 1/5</span>
           </div>
           <div className="top-status">
             <div className="glass-chip"><span>Пн · {weather}</span><b>{timeLabel}</b></div>
@@ -774,7 +879,7 @@ export default function SecurityConsoleGame() {
           <div className="intro-copy">
             <div className="eyebrow">● Играбельный low-poly прототип</div>
             <h1>Пульт <em>охраны</em></h1>
-            <p>Небольшой посёлок у реки. Десять домов, десять разных характеров и одна цель: заслужить доверие жителей и открыть собственный пульт наблюдения.</p>
+            <p>Алексей вернулся из города в родной посёлок у реки. Здесь десять домов, знакомые с детства улицы и одна цель: заслужить доверие жителей и открыть собственный пульт наблюдения.</p>
             <div className="intro-actions">
               <button className="primary-btn" onClick={() => setMode("world")}>Выйти в посёлок →</button>
               <button className="soft-btn" onClick={() => startOffice(true)}>Демо пульта</button>
@@ -845,12 +950,31 @@ export default function SecurityConsoleGame() {
           <div className="tablet-frame">
             <aside className="tablet-sidebar">
               <h2>Мой пульт</h2>
+              <button className={`tablet-tab ${tabletTab === "hero" ? "active" : ""}`} onClick={() => setTabletTab("hero")}>Алексей и навыки</button>
               <button className={`tablet-tab ${tabletTab === "clients" ? "active" : ""}`} onClick={() => setTabletTab("clients")}>Жители и договоры</button>
               <button className={`tablet-tab ${tabletTab === "finance" ? "active" : ""}`} onClick={() => setTabletTab("finance")}>Финансы</button>
               <button className={`tablet-tab ${tabletTab === "map" ? "active" : ""}`} onClick={() => setTabletTab("map")}>Смена и прогресс</button>
               <button className="tablet-tab tablet-close" onClick={() => setMode("world")}>← Вернуться в игру</button>
             </aside>
             <div className="tablet-content">
+              {tabletTab === "hero" && <>
+                <div className="hero-profile-head">
+                  <div className="hero-profile-avatar">А</div>
+                  <div><small>Главный герой</small><h1>Алексей</h1><p>30 лет · вернулся домой, чтобы открыть охранное предприятие</p></div>
+                </div>
+                <div className="skill-grid">
+                  <div className="skill-box"><span>Красноречие</span><b>2 / 10</b><small>Успешные переговоры</small></div>
+                  <div className="skill-box"><span>Наблюдательность</span><b>1 / 5</b><small>Скрытые потребности NPC</small></div>
+                  <div className="skill-box"><span>Выносливость</span><b>{energy} / 100</b><small>Бег и активность</small></div>
+                  <div className="skill-box"><span>Репутация</span><b>{reputation} / 100</b><small>{reputation < 20 ? "Новичок" : "Знакомое лицо"}</small></div>
+                  <div className="skill-box"><span>Техническая грамотность</span><b>1 / 10</b><small>Работа за пультом</small></div>
+                </div>
+                <div className="perk-strip">
+                  <strong>Будущая специализация</strong>
+                  <span>Дипломат</span><span>Технарь</span><span>Драйвер</span>
+                </div>
+                <p className="hero-story">Алексей вырос в ПервоРеченском, затем работал менеджером в городском ЧОПе. Услышав о кражах в родном посёлке, он вернулся со старой машиной, небольшим капиталом и намерением снова заслужить доверие соседей.</p>
+              </>}
               {tabletTab === "clients" && <>
                 <h1>Жители посёлка</h1>
                 <p>{signedCount} из 10 объектов подключено к будущему пульту.</p>
