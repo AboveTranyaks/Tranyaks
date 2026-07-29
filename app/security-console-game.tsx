@@ -545,8 +545,13 @@ const OUTFIT_BY_ID = Object.fromEntries(OUTFITS.map((outfit) => [outfit.id, outf
 
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const mapPos = (value: number, extent: number) => `${50 + (value / extent) * 44}%`;
-const worldMapX = (x: number) => `${clamp(((x + 180) / 4360) * 100, 2, 98)}%`;
-const worldMapZ = (z: number) => `${clamp(50 - (z / 390) * 72, 8, 92)}%`;
+const worldMapXPct = (x: number) => clamp(((x + 180) / 4360) * 100, 2, 98);
+const worldMapZPct = (z: number) => clamp(50 - (z / 390) * 72, 8, 92);
+const worldMapX = (x: number) => `${worldMapXPct(x)}%`;
+const worldMapZ = (z: number) => `${worldMapZPct(z)}%`;
+const formatDistance = (distance: number) => distance < 1000 ? `${Math.round(distance)} м` : `${(distance / 1000).toFixed(1)} км`;
+const DEFAULT_PLAYER_POSITION = { x: -4, z: -2 };
+const DEFAULT_CAR_POSITION = { x: 0, z: -7 };
 const LEGACY_SAVE_KEY = "security-console-save-v1";
 const ACTIVE_SAVE_KEY = "security-console-active-save-v2";
 const SAVE_SLOT_PREFIX = "security-console-slot-v2-";
@@ -590,8 +595,8 @@ const DEFAULT_SAVE: SaveData = {
   energy: 100,
   gameTime: 8.25,
   weather: "Ясно",
-  playerPos: { x: -4, z: -2 },
-  carPos: { x: 3, z: 2 },
+  playerPos: DEFAULT_PLAYER_POSITION,
+  carPos: DEFAULT_CAR_POSITION,
   carFuel: 40,
   carWear: 0,
   statistics: EMPTY_STATS,
@@ -735,6 +740,21 @@ function residentsFromSave(save: SaveData): Resident[] {
     interest: save.interests[resident.id] ?? 38 + ((resident.id * 7) % 13),
     signed: save.contracts.includes(resident.id),
   }));
+}
+
+function resolveCarSpawnPosition(playerPosition = DEFAULT_PLAYER_POSITION, savedCarPosition = DEFAULT_CAR_POSITION) {
+  const valid = Number.isFinite(savedCarPosition.x) && Number.isFinite(savedCarPosition.z);
+  const tooFarAway = valid && Math.hypot(savedCarPosition.x - playerPosition.x, savedCarPosition.z - playerPosition.z) > 500;
+  if (valid && !tooFarAway) return savedCarPosition;
+  return {
+    x: clamp(playerPosition.x + 4, -175, 4175),
+    z: clamp(playerPosition.z - 5, -190, 190),
+  };
+}
+
+function clearGameStorage(storage: Storage) {
+  const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter((key): key is string => Boolean(key));
+  keys.filter((key) => key.startsWith("security-console-") || key.startsWith("pult-ohrany-")).forEach((key) => storage.removeItem(key));
 }
 
 function mat(color: number, roughness = 0.86) {
@@ -1186,6 +1206,8 @@ export default function SecurityConsoleGame() {
   const initialOutfit = initialSave.outfit && OUTFIT_BY_ID[initialSave.outfit] ? initialSave.outfit : "casual";
   const initialOwned = Array.from(new Set<OutfitId>(["casual", ...(initialSave.ownedOutfits ?? [])])).filter((id) => Boolean(OUTFIT_BY_ID[id]));
   const initialCarUpgrade = clamp(initialSave.carUpgrade ?? 0, 0, 3);
+  const initialPlayerPosition = initialSave.playerPos ?? DEFAULT_PLAYER_POSITION;
+  const initialCarPosition = resolveCarSpawnPosition(initialPlayerPosition, initialSave.carPos ?? DEFAULT_CAR_POSITION);
   const [initialProfile] = useState<PlayerProfile>(() => initialSave.profile ?? readProfile());
   const [mode, setMode] = useState<GameMode>("intro");
   const modeRef = useRef<GameMode>("intro");
@@ -1204,12 +1226,13 @@ export default function SecurityConsoleGame() {
   const [toast, setToast] = useState("");
   const [showTariff, setShowTariff] = useState(false);
   const [tabletTab, setTabletTab] = useState<TabletTab>("hero");
-  const [playerPos, setPlayerPos] = useState(initialSave.playerPos ?? { x: -4, z: -2 });
-  const [carPos, setCarPos] = useState(initialSave.carPos ?? { x: 3, z: 2 });
+  const [playerPos, setPlayerPos] = useState(initialPlayerPosition);
+  const [carPos, setCarPos] = useState(initialCarPosition);
   const [locationName, setLocationName] = useState("село Первореченское");
   const [weather, setWeather] = useState<WeatherKind>(initialSave.weather ?? "Ясно");
   const weatherRef = useRef<WeatherKind>(initialSave.weather ?? "Ясно");
   const [movementState, setMovementState] = useState<MovementState>("Покой");
+  const [playerSpeedKmh, setPlayerSpeedKmh] = useState(0);
   const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: initialSave.carFuel ?? 40, surface: "Асфальт" as SurfaceKind, wear: initialSave.carWear ?? 0 });
   const [outfitId, setOutfitId] = useState<OutfitId>(initialOutfit);
   const outfitRef = useRef<OutfitId>(initialOutfit);
@@ -1984,13 +2007,13 @@ export default function SecurityConsoleGame() {
     makeRoadSign("СЕЛО ПЕРОВОРЕЧЕНСКОЕ", 3795, -12, true);
 
     const player = makeHero();
-    player.position.set(initialSave.playerPos?.x ?? -4, 0, initialSave.playerPos?.z ?? -3);
+    player.position.set(initialPlayerPosition.x, 0, initialPlayerPosition.z);
     applyOutfit(player, OUTFIT_BY_ID[outfitRef.current]);
     scene.add(player);
     engine.player = player;
 
     const car = makeCar();
-    car.position.set(initialSave.carPos?.x ?? -13, 0, initialSave.carPos?.z ?? -5.5);
+    car.position.set(initialCarPosition.x, 0, initialCarPosition.z);
     car.rotation.y = Math.PI / 2;
     scene.add(car);
     engine.car = car;
@@ -2013,6 +2036,7 @@ export default function SecurityConsoleGame() {
       scene.add(npc);
     });
     engine.residents = residentsRef.current;
+    console.info(`[NPCSpawner] Создано базовых NPC: ${engine.residents.length}`);
 
     const walkerColors = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
     for (const villageX of [0, 4000]) {
@@ -2213,6 +2237,7 @@ export default function SecurityConsoleGame() {
       const canMove = modeRef.current === "world";
       const focus = engine.driving ? car : player;
       let currentMovement: MovementState = "Покой";
+      let currentWalkSpeedKmh = 0;
 
       if (canMove && engine.driving) {
         const throttle = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
@@ -2309,8 +2334,9 @@ export default function SecurityConsoleGame() {
         const surface = surfaceAt(player.position.x, player.position.z);
         const surfaceSpeed = surface === "Асфальт" ? 1 : surface === "Грунт" ? 0.95 * outfit.ground : 0.85 * outfit.ground;
         const fatigueSpeed = energyRef.current < 20 ? 0.7 : 1;
-        const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.8;
+        const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.4;
         const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed;
+        currentWalkSpeedKmh = moving ? speed * 3.6 : 0;
         if (moving) {
           const angle = engine.yaw;
           const length = Math.max(1, Math.hypot(forward, side));
@@ -2451,6 +2477,7 @@ export default function SecurityConsoleGame() {
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
         setCarPos({ x: car.position.x, z: car.position.z });
         setMovementState(currentMovement);
+        setPlayerSpeedKmh(Math.round(currentWalkSpeedKmh * 10) / 10);
         setCarTelemetry({
           speed: Math.round(Math.abs(engine.carSpeed) * 3.6),
           fuel: Math.round(engine.fuel * 10) / 10,
@@ -3080,21 +3107,38 @@ export default function SecurityConsoleGame() {
     setNetworkChatInput("");
   };
 
-  const resetSave = () => {
-    if (!window.confirm("Начать заново? Деньги, договоры, районы, машины, задания и статистика будут сброшены. Профиль и приватность сохранятся.")) return;
-    localStorage.removeItem(LEGACY_SAVE_KEY);
-    (["auto", "slot1", "slot2", "slot3"] as SaveSlotId[]).forEach((slot) => localStorage.removeItem(`${SAVE_SLOT_PREFIX}${slot}`));
+  const FullResetAndRestart = () => {
+    if (!window.confirm("Сбросить игру полностью? Будут удалены профиль, деньги, договоры, районы, транспорт, задания, статистика и все слоты сохранений.")) return;
+    try {
+      networkChannelRef.current?.postMessage({ type: "leave", senderId: profileRef.current.id });
+      networkChannelRef.current?.close();
+      networkChannelRef.current = null;
+    } catch {
+      // The room may already be closed; reset must continue regardless.
+    }
+    try {
+      clearGameStorage(localStorage);
+      clearGameStorage(sessionStorage);
+    } catch {
+      // Storage can be unavailable in privacy mode; the in-memory restart still proceeds.
+    }
     const cleanStart = migrateSave({
       ...DEFAULT_SAVE,
       money: 15000,
       reputation: 0,
       contracts: [],
-      interests: Object.fromEntries(RESIDENT_SEED.map((resident) => [resident.id, 0])),
-      profile: profileRef.current,
+      interests: {},
+      playerPos: { ...DEFAULT_PLAYER_POSITION },
+      carPos: { ...DEFAULT_CAR_POSITION },
       statistics: { ...EMPTY_STATS },
       dailyChallenges: createDailyChallenges(undefined, false),
     });
-    localStorage.setItem(ACTIVE_SAVE_KEY, JSON.stringify(cleanStart));
+    try {
+      localStorage.setItem(ACTIVE_SAVE_KEY, JSON.stringify(cleanStart));
+    } catch {
+      // If storage is unavailable, readSave() will still use DEFAULT_SAVE after reload.
+    }
+    console.info(`[GameReset] Полный сброс выполнен. При перезапуске будет создано NPC: ${RESIDENT_SEED.length}`);
     window.location.reload();
   };
 
@@ -3104,6 +3148,23 @@ export default function SecurityConsoleGame() {
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   }, [gameTime]);
   const mapCenterX = playerPos.x;
+  const waypointDistance = mapWaypoint ? Math.hypot(mapWaypoint.x - playerPos.x, mapWaypoint.z - playerPos.z) : null;
+  const mapRouteStyle = useMemo(() => {
+    if (!mapWaypoint) return undefined;
+    const startX = worldMapXPct(playerPos.x);
+    const startY = worldMapZPct(playerPos.z);
+    const endX = worldMapXPct(mapWaypoint.x);
+    const endY = worldMapZPct(mapWaypoint.z);
+    const dx = endX - startX;
+    const dy = endY - startY;
+    if (![startX, startY, endX, endY, dx, dy].every(Number.isFinite)) return undefined;
+    return {
+      left: `${startX}%`,
+      top: `${startY}%`,
+      width: `${Math.hypot(dx, dy)}%`,
+      transform: `rotate(${Math.atan2(dy, dx)}rad)`,
+    };
+  }, [mapWaypoint, playerPos.x, playerPos.z]);
   const placeWaypointFromMap = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -3153,7 +3214,7 @@ export default function SecurityConsoleGame() {
           <div className="energy-card">
             <div className="energy-label"><span>Энергия менеджера</span><b>{energy}%</b></div>
             <div className="energy-track"><div className="energy-fill" style={{ width: `${energy}%` }} /></div>
-            <small>{driving ? "За рулём" : movementState}{energy < 20 ? " · усталость" : ""}</small>
+            <small>{driving ? "За рулём" : `${movementState}${playerSpeedKmh > 0 ? ` · ${playerSpeedKmh.toFixed(1)} км/ч` : ""}`}{energy < 20 ? " · усталость" : ""}</small>
           </div>
           {driving && (
             <div className="vehicle-card">
@@ -3219,6 +3280,7 @@ export default function SecurityConsoleGame() {
               return <span key={`quest-mini-${progress.id}`} className={`map-quest map-quest-${definition.category}`} style={{ left: mapPos(definition.target.x - playerPos.x, 80), top: mapPos(playerPos.z - definition.target.z, 80) }}>!</span>;
             })}
             {networkPlayers.filter((player) => player.id !== profile.id && Math.hypot(player.x - playerPos.x, player.z - playerPos.z) <= 80).map((player) => <span key={`coop-mini-${player.id}`} className="map-coop-player" title={player.name} style={{ left: mapPos(player.x - playerPos.x, 80), top: mapPos(playerPos.z - player.z, 80) }}>{player.name.slice(0, 1)}</span>)}
+            {mapWaypoint && waypointDistance !== null && waypointDistance <= 80 && <span className="map-waypoint-mini" title={mapWaypoint.label} style={{ left: mapPos(mapWaypoint.x - playerPos.x, 80), top: mapPos(playerPos.z - mapWaypoint.z, 80) }}>◎</span>}
             </div>
             {quests.filter((quest) => quest.tracked && quest.status === "active").map((progress) => {
               const definition = QUESTS.find((quest) => quest.id === progress.id);
@@ -3226,7 +3288,12 @@ export default function SecurityConsoleGame() {
               const angle = Math.atan2(playerPos.z - definition.target.z, definition.target.x - playerPos.x) - (minimapRotates ? engineRef.current.yaw : 0);
               return <span key={`quest-edge-${progress.id}`} className={`map-quest-edge map-quest-${definition.category}`} title={definition.title} style={{ left: `${50 + Math.cos(angle) * 42}%`, top: `${50 + Math.sin(angle) * 42}%`, transform: `translate(-50%, -50%) rotate(${angle + Math.PI / 2}rad)` }}>▲</span>;
             })}
+            {mapWaypoint && waypointDistance !== null && waypointDistance > 80 && (() => {
+              const angle = Math.atan2(playerPos.z - mapWaypoint.z, mapWaypoint.x - playerPos.x) - (minimapRotates ? engineRef.current.yaw : 0);
+              return <span className="map-waypoint-edge" title={mapWaypoint.label} style={{ left: `${50 + Math.cos(angle) * 44}%`, top: `${50 + Math.sin(angle) * 38}%`, transform: `translate(-50%, -50%) rotate(${angle + Math.PI / 2}rad)` }}>▲</span>;
+            })()}
             <span className="map-player" style={{ left: "50%", top: "50%", transform: `translate(-50%, -50%) rotate(${minimapRotates ? 0 : engineRef.current.yaw}rad)` }} />
+            {mapWaypoint && waypointDistance !== null && <span className="minimap-distance">◎ {formatDistance(waypointDistance)}</span>}
           </div>
           {mode === "world" && (nearest || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
@@ -3624,7 +3691,7 @@ export default function SecurityConsoleGame() {
                   <button className="primary-btn" onClick={closeBusinessMonth}>Закрыть месяц</button>
                   {!loan ? [10000, 50000, 200000].map((amount) => <button key={amount} className="soft-btn" onClick={() => takeLoan(amount)}>Кредит {amount.toLocaleString("ru-RU")} ₽</button>) : <div className="loan-card"><span>Кредит · 10%/мес.</span><b>{loan.principal.toLocaleString("ru-RU")} ₽</b></div>}
                   <button className="soft-btn" onClick={cycleWeather}>Сменить погоду: {weather}</button>
-                  <button className="soft-btn" style={{ color: "#315c45", borderColor: "#bfc8b8" }} onClick={resetSave}>Начать заново</button>
+                  <button className="soft-btn" style={{ color: "#315c45", borderColor: "#bfc8b8" }} onClick={FullResetAndRestart}>Начать заново</button>
                 </div>
               </>}
               {tabletTab === "profile" && <>
@@ -3697,6 +3764,7 @@ export default function SecurityConsoleGame() {
                     </article>;
                   })}
                 </div>
+                <div className="full-reset-panel"><div><b>Диагностика полного сброса</b><span>Удаляет только данные «Пульта охраны», отключает локальную сетевую комнату и заново создаёт базовых жителей.</span></div><button onClick={FullResetAndRestart}>Сбросить всё</button></div>
               </>}
             </div>
           </div>
@@ -3743,7 +3811,7 @@ export default function SecurityConsoleGame() {
               })}
               {mapLayers.notes && mapNotes.map((note) => <button key={note.id} className="world-note" title={note.text} onClick={() => setSelectedMapObject(note.text)} style={{ left: worldMapX(note.x), top: worldMapZ(note.z) }}>⚑</button>)}
               {mapWaypoint && <span className="world-waypoint" title={mapWaypoint.label} style={{ left: worldMapX(mapWaypoint.x), top: worldMapZ(mapWaypoint.z) }}>◎</span>}
-              {mapWaypoint && <div className="world-route active" />}
+              {mapWaypoint && mapRouteStyle && <div className="world-route active" style={mapRouteStyle} />}
               {mapLayers.vehicles && <span className="world-car" title={VEHICLE_BY_ID[currentVehicle].name} style={{ left: worldMapX(carPos.x), top: worldMapZ(carPos.z) }}>◆</span>}
               {networkPlayers.filter((player) => player.id !== profile.id).map((player) => <span className="world-coop-player" title={`${player.name} · ${player.role}`} key={`world-coop-${player.id}`} style={{ left: worldMapX(player.x), top: worldMapZ(player.z) }}>{player.name.slice(0, 1)}</span>)}
               <span className="world-player" title={profile.nickname} style={{ left: worldMapX(playerPos.x), top: worldMapZ(playerPos.z) }}>{profile.nickname.slice(0, 1).toUpperCase()}</span>
@@ -3768,7 +3836,7 @@ export default function SecurityConsoleGame() {
 
       {mode === "pause" && (
         <section className="overlay pause-overlay">
-          <div className="pause-card"><small>Игра приостановлена</small><h1>Пульт охраны</h1><button className="primary-btn" onClick={() => setMode("world")}>Продолжить</button>{officeRented && totalContracts > 0 && <button className="soft-btn" onClick={() => startOffice()}>Дежурство · играть за пульт</button>}<button className="soft-btn" onClick={() => { setTabletTab("quests"); setMode("tablet"); }}>Журнал заданий</button><button className="soft-btn" onClick={() => setMinimapRotates((value) => !value)}>Миникарта: {minimapRotates ? "вращается за героем" : "север сверху"}</button><button className="soft-btn" onClick={() => { setTabletTab("saves"); setMode("tablet"); }}>Сохранения</button><button className="soft-btn" onClick={() => manualSave("slot1")}>Быстро сохранить в слот 1</button><button className="soft-btn" onClick={resetSave}>Начать заново</button></div>
+          <div className="pause-card"><small>Игра приостановлена</small><h1>Пульт охраны</h1><button className="primary-btn" onClick={() => setMode("world")}>Продолжить</button>{officeRented && totalContracts > 0 && <button className="soft-btn" onClick={() => startOffice()}>Дежурство · играть за пульт</button>}<button className="soft-btn" onClick={() => { setTabletTab("quests"); setMode("tablet"); }}>Журнал заданий</button><button className="soft-btn" onClick={() => setMinimapRotates((value) => !value)}>Миникарта: {minimapRotates ? "вращается за героем" : "север сверху"}</button><button className="soft-btn" onClick={() => { setTabletTab("saves"); setMode("tablet"); }}>Сохранения</button><button className="soft-btn" onClick={() => manualSave("slot1")}>Быстро сохранить в слот 1</button><button className="soft-btn" onClick={FullResetAndRestart}>Начать заново</button></div>
         </section>
       )}
 
