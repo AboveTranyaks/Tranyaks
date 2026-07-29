@@ -37,3 +37,22 @@ test("contains wardrobe, office zones, and static Pages publishing config", asyn
   assert.match(styles, /\.garage-stage/);
   assert.match(pagesConfig, /base:\s*"\/Tranyaks\/"/);
 });
+
+test("contains separate map and tablet controls, profiles, saves, and offline ratings", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /setMode\("map"\)/);
+  assert.match(source, /e\.code === "KeyP"/);
+  assert.match(source, /type SaveSlotId = "auto" \| "slot1" \| "slot2" \| "slot3"/);
+  assert.match(source, /const LEADERBOARD_SEED/);
+  assert.match(source, /tabletTab === "profile"/);
+  assert.match(source, /tabletTab === "rating"/);
+  assert.match(source, /tabletTab === "saves"/);
+  assert.match(source, /checksum\(envelope\.data\)/);
+  assert.match(styles, /\.full-map-overlay/);
+  assert.match(styles, /\.save-grid/);
+  assert.match(styles, /\.leaderboard-table/);
+});

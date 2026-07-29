@@ -1,15 +1,46 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "world" | "dialogue" | "tablet" | "tariff" | "office";
+type GameMode = "intro" | "world" | "dialogue" | "tablet" | "map" | "pause" | "tariff" | "office";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
 type SurfaceKind = "Асфальт" | "Грунт" | "Трава";
 type MovementState = "Покой" | "Шаг" | "Быстрый шаг" | "Бег трусцой";
+type TabletTab = "hero" | "wardrobe" | "clients" | "finance" | "profile" | "rating" | "saves";
+type SaveSlotId = "auto" | "slot1" | "slot2" | "slot3";
+type PrivacyMode = "all" | "summary" | "hidden";
+type AvatarId = "avatar_01" | "avatar_02" | "avatar_03" | "avatar_04";
+
+type PlayerProfile = {
+  id: string;
+  nickname: string;
+  avatar: AvatarId;
+  privacy: PrivacyMode;
+  createdAt: string;
+};
+
+type PlayerStatistics = {
+  totalContracts: number;
+  alarmsResponded: number;
+  falseAlarms: number;
+  successfulPreventions: number;
+  kmWalked: number;
+  kmDriven: number;
+  maxIncome: number;
+  playTimeSeconds: number;
+  citizenRating: number;
+};
+
+type MapNote = {
+  id: string;
+  text: string;
+  x: number;
+  z: number;
+};
 
 type Resident = {
   id: number;
@@ -35,6 +66,26 @@ type SaveData = {
   outfit?: OutfitId;
   ownedOutfits?: OutfitId[];
   carUpgrade?: number;
+  energy?: number;
+  gameTime?: number;
+  weather?: WeatherKind;
+  playerPos?: { x: number; z: number };
+  carPos?: { x: number; z: number };
+  carFuel?: number;
+  carWear?: number;
+  profile?: PlayerProfile;
+  statistics?: PlayerStatistics;
+  achievements?: string[];
+  mapNotes?: MapNote[];
+};
+
+type SaveEnvelope = {
+  version: "2.0.0";
+  slot: SaveSlotId;
+  saveName: string;
+  savedAt: string;
+  checksum: string;
+  data: SaveData;
 };
 
 type InputAction = "forward" | "backward" | "left" | "right" | "sprint" | "brake";
@@ -189,6 +240,137 @@ const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const mapPos = (value: number, extent: number) => `${50 + (value / extent) * 44}%`;
 const worldMapX = (x: number) => `${clamp(((x + 180) / 4360) * 100, 2, 98)}%`;
 const worldMapZ = (z: number) => `${clamp(50 - (z / 390) * 72, 8, 92)}%`;
+const LEGACY_SAVE_KEY = "security-console-save-v1";
+const ACTIVE_SAVE_KEY = "security-console-active-save-v2";
+const SAVE_SLOT_PREFIX = "security-console-slot-v2-";
+const PROFILE_KEY = "security-console-profile-v2";
+const STATISTICS_QUEUE_KEY = "security-console-statistics-queue-v1";
+
+const EMPTY_STATS: PlayerStatistics = {
+  totalContracts: 0,
+  alarmsResponded: 0,
+  falseAlarms: 0,
+  successfulPreventions: 0,
+  kmWalked: 0,
+  kmDriven: 0,
+  maxIncome: 0,
+  playTimeSeconds: 0,
+  citizenRating: 3.5,
+};
+
+const ACHIEVEMENTS = [
+  { id: "first_contract", title: "Первый контракт", description: "Подпишите первого клиента." },
+  { id: "trusted_manager", title: "Заслуженное доверие", description: "Достигните 50 очков репутации." },
+  { id: "road_trip", title: "Знаю каждую дорогу", description: "Проедьте 5 километров." },
+  { id: "night_owl", title: "Ночной ястреб", description: "Успешно обработайте тревогу." },
+] as const;
+
+const LEADERBOARD_SEED = [
+  { rank: 1, playerName: "Охранник_Вася", avatar: "avatar_04", value: 1500, trend: "up" },
+  { rank: 2, playerName: "Тихий_Пульт", avatar: "avatar_02", value: 1240, trend: "same" },
+  { rank: 3, playerName: "Станица_ГБР", avatar: "avatar_03", value: 980, trend: "up" },
+  { rank: 4, playerName: "Мария_Сигнал", avatar: "avatar_01", value: 760, trend: "down" },
+] as const;
+
+const DEFAULT_SAVE: SaveData = {
+  money: 5000,
+  reputation: 0,
+  contracts: [],
+  interests: {},
+  outfit: "casual",
+  ownedOutfits: ["casual"],
+  carUpgrade: 0,
+  energy: 100,
+  gameTime: 8.25,
+  weather: "Ясно",
+  playerPos: { x: -4, z: -2 },
+  carPos: { x: 3, z: 2 },
+  carFuel: 40,
+  carWear: 0,
+  statistics: EMPTY_STATS,
+  achievements: [],
+  mapNotes: [],
+};
+
+function checksum(data: SaveData) {
+  const text = JSON.stringify(data);
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
+  return {
+    ...DEFAULT_SAVE,
+    ...value,
+    contracts: Array.isArray(value?.contracts) ? value.contracts : [],
+    interests: value?.interests ?? {},
+    ownedOutfits: Array.isArray(value?.ownedOutfits) ? value.ownedOutfits : ["casual"],
+    statistics: { ...EMPTY_STATS, ...(value?.statistics ?? {}) },
+    achievements: Array.isArray(value?.achievements) ? value.achievements : [],
+    mapNotes: Array.isArray(value?.mapNotes) ? value.mapNotes : [],
+  };
+}
+
+function createProfile(): PlayerProfile {
+  return {
+    id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `player-${Date.now()}`,
+    nickname: "Алексей",
+    avatar: "avatar_01",
+    privacy: "all",
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function readProfile(): PlayerProfile {
+  if (typeof window === "undefined") return { id: "local-player", nickname: "Алексей", avatar: "avatar_01", privacy: "all", createdAt: "2026-01-01T00:00:00.000Z" };
+  try {
+    const saved = localStorage.getItem(PROFILE_KEY);
+    if (saved) return JSON.parse(saved) as PlayerProfile;
+  } catch {
+    // The profile is recreated if local storage was damaged.
+  }
+  const profile = createProfile();
+  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  return profile;
+}
+
+function readEnvelope(slot: SaveSlotId): SaveEnvelope | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(`${SAVE_SLOT_PREFIX}${slot}`);
+    if (!raw) return null;
+    const envelope = JSON.parse(raw) as SaveEnvelope;
+    if (envelope.version !== "2.0.0" || checksum(envelope.data) !== envelope.checksum) return null;
+    return { ...envelope, data: migrateSave(envelope.data) };
+  } catch {
+    return null;
+  }
+}
+
+function writeEnvelope(slot: SaveSlotId, saveName: string, data: SaveData) {
+  const migrated = migrateSave(data);
+  const envelope: SaveEnvelope = {
+    version: "2.0.0",
+    slot,
+    saveName,
+    savedAt: new Date().toISOString(),
+    checksum: checksum(migrated),
+    data: migrated,
+  };
+  localStorage.setItem(`${SAVE_SLOT_PREFIX}${slot}`, JSON.stringify(envelope));
+  localStorage.setItem(ACTIVE_SAVE_KEY, JSON.stringify(migrated));
+  return envelope;
+}
+
+function queueStatistics(profile: PlayerProfile, statistics: PlayerStatistics) {
+  if (typeof window === "undefined") return;
+  const packet = { player_id: profile.id, created_at: new Date().toISOString(), statistics, checksum: checksum({ ...DEFAULT_SAVE, profile, statistics }) };
+  localStorage.setItem(STATISTICS_QUEUE_KEY, JSON.stringify([packet]));
+}
 
 function surfaceAt(x: number, z: number): SurfaceKind {
   if (Math.abs(z) <= 8) return "Асфальт";
@@ -200,16 +382,18 @@ function surfaceAt(x: number, z: number): SurfaceKind {
 }
 
 function readSave(): SaveData {
-  if (typeof window === "undefined") {
-    return { money: 5000, reputation: 0, contracts: [], interests: {}, outfit: "casual", ownedOutfits: ["casual"], carUpgrade: 0 };
-  }
+  if (typeof window === "undefined") return DEFAULT_SAVE;
   try {
-    const raw = localStorage.getItem("security-console-save-v1");
-    if (raw) return JSON.parse(raw) as SaveData;
+    const active = localStorage.getItem(ACTIVE_SAVE_KEY);
+    if (active) return migrateSave(JSON.parse(active) as SaveData);
+    const autosave = readEnvelope("auto");
+    if (autosave) return autosave.data;
+    const legacy = localStorage.getItem(LEGACY_SAVE_KEY);
+    if (legacy) return migrateSave(JSON.parse(legacy) as SaveData);
   } catch {
     // A clean start is safer than a broken save.
   }
-  return { money: 5000, reputation: 0, contracts: [], interests: {}, outfit: "casual", ownedOutfits: ["casual"], carUpgrade: 0 };
+  return DEFAULT_SAVE;
 }
 
 function residentsFromSave(save: SaveData): Resident[] {
@@ -667,13 +851,14 @@ export default function SecurityConsoleGame() {
   const initialOutfit = initialSave.outfit && OUTFIT_BY_ID[initialSave.outfit] ? initialSave.outfit : "casual";
   const initialOwned = Array.from(new Set<OutfitId>(["casual", ...(initialSave.ownedOutfits ?? [])])).filter((id) => Boolean(OUTFIT_BY_ID[id]));
   const initialCarUpgrade = clamp(initialSave.carUpgrade ?? 0, 0, 3);
+  const [initialProfile] = useState<PlayerProfile>(() => initialSave.profile ?? readProfile());
   const [mode, setMode] = useState<GameMode>("intro");
   const modeRef = useRef<GameMode>("intro");
-  const [energy, setEnergy] = useState(100);
-  const energyRef = useRef(100);
+  const [energy, setEnergy] = useState(initialSave.energy ?? 100);
+  const energyRef = useRef(initialSave.energy ?? 100);
   const [money, setMoney] = useState(initialSave.money);
   const [reputation, setReputation] = useState(initialSave.reputation);
-  const [gameTime, setGameTime] = useState(8.25);
+  const [gameTime, setGameTime] = useState(initialSave.gameTime ?? 8.25);
   const [driving, setDriving] = useState(false);
   const [nearCar, setNearCar] = useState(false);
   const [nearest, setNearest] = useState<Resident | null>(null);
@@ -683,14 +868,15 @@ export default function SecurityConsoleGame() {
   const [npcLine, setNpcLine] = useState("");
   const [toast, setToast] = useState("");
   const [showTariff, setShowTariff] = useState(false);
-  const [tabletTab, setTabletTab] = useState<"hero" | "wardrobe" | "clients" | "finance" | "map">("hero");
-  const [playerPos, setPlayerPos] = useState({ x: -4, z: -2 });
+  const [tabletTab, setTabletTab] = useState<TabletTab>("hero");
+  const [playerPos, setPlayerPos] = useState(initialSave.playerPos ?? { x: -4, z: -2 });
+  const [carPos, setCarPos] = useState(initialSave.carPos ?? { x: 3, z: 2 });
   const [locationName, setLocationName] = useState<"Первореченское" | "станица Динская">("Первореченское");
   const [distanceToDinskaya, setDistanceToDinskaya] = useState(4);
-  const [weather, setWeather] = useState<WeatherKind>("Ясно");
-  const weatherRef = useRef<WeatherKind>("Ясно");
+  const [weather, setWeather] = useState<WeatherKind>(initialSave.weather ?? "Ясно");
+  const weatherRef = useRef<WeatherKind>(initialSave.weather ?? "Ясно");
   const [movementState, setMovementState] = useState<MovementState>("Покой");
-  const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: 40, surface: "Асфальт" as SurfaceKind, wear: 0 });
+  const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: initialSave.carFuel ?? 40, surface: "Асфальт" as SurfaceKind, wear: initialSave.carWear ?? 0 });
   const [outfitId, setOutfitId] = useState<OutfitId>(initialOutfit);
   const outfitRef = useRef<OutfitId>(initialOutfit);
   const [ownedOutfits, setOwnedOutfits] = useState<OutfitId[]>(initialOwned);
@@ -703,6 +889,29 @@ export default function SecurityConsoleGame() {
   const [officeMessage, setOfficeMessage] = useState("Офис готов к работе. Выберите помещение слева.");
   const [alarm, setAlarm] = useState<null | { type: string; address: string; correct: string }>(null);
   const [alarmResult, setAlarmResult] = useState("Система в норме. Ожидаем сигнал.");
+  const [profile, setProfile] = useState<PlayerProfile>(initialProfile);
+  const profileRef = useRef(profile);
+  const [statistics, setStatistics] = useState<PlayerStatistics>(() => ({
+    ...EMPTY_STATS,
+    ...(initialSave.statistics ?? {}),
+    totalContracts: Math.max(initialSave.contracts.length, initialSave.statistics?.totalContracts ?? 0),
+  }));
+  const statisticsRef = useRef(statistics);
+  const [achievements, setAchievements] = useState<string[]>(initialSave.achievements ?? []);
+  const achievementsRef = useRef(achievements);
+  const [mapNotes, setMapNotes] = useState<MapNote[]>(initialSave.mapNotes ?? []);
+  const mapNotesRef = useRef(mapNotes);
+  const [saveSlots, setSaveSlots] = useState<Record<SaveSlotId, SaveEnvelope | null>>(() => ({
+    auto: readEnvelope("auto"),
+    slot1: readEnvelope("slot1"),
+    slot2: readEnvelope("slot2"),
+    slot3: readEnvelope("slot3"),
+  }));
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState<"all_time" | "monthly" | "weekly">("all_time");
+  const [leaderboardCategory, setLeaderboardCategory] = useState<"reputation" | "clients" | "income" | "prevention_rate" | "level">("reputation");
+  const [mapLayers, setMapLayers] = useState({ clients: true, vehicles: true, points: true, notes: true });
+  const [selectedMapObject, setSelectedMapObject] = useState<string | null>(null);
+  const [mapWaypoint, setMapWaypoint] = useState<{ x: number; z: number; label: string } | null>(null);
 
   const signedCount = residents.filter((r) => r.signed).length;
   const monthlyIncome = residents.filter((r) => r.signed).length * 890;
@@ -714,7 +923,8 @@ export default function SecurityConsoleGame() {
   }, []);
 
   const persist = useCallback(
-    (nextResidents = residentsRef.current, nextMoney = money, nextRep = reputation) => {
+    (nextResidents = residentsRef.current, nextMoney = money, nextRep = reputation, slot: SaveSlotId = "auto", saveName = "Автосохранение") => {
+      const engine = engineRef.current;
       const save: SaveData = {
         money: nextMoney,
         reputation: nextRep,
@@ -723,11 +933,68 @@ export default function SecurityConsoleGame() {
         outfit: outfitRef.current,
         ownedOutfits: ownedOutfitsRef.current,
         carUpgrade: carUpgradeRef.current,
+        energy: energyRef.current,
+        gameTime: engine.time,
+        weather: weatherRef.current,
+        playerPos: engine.player ? { x: engine.player.position.x, z: engine.player.position.z } : initialSave.playerPos,
+        carPos: engine.car ? { x: engine.car.position.x, z: engine.car.position.z } : initialSave.carPos,
+        carFuel: engine.fuel,
+        carWear: engine.wear,
+        profile: profileRef.current,
+        statistics: statisticsRef.current,
+        achievements: achievementsRef.current,
+        mapNotes: mapNotesRef.current,
       };
-      localStorage.setItem("security-console-save-v1", JSON.stringify(save));
+      const envelope = writeEnvelope(slot, saveName, save);
+      setSaveSlots((current) => ({ ...current, [slot]: envelope }));
     },
     [money, reputation],
   );
+  const persistRef = useRef(persist);
+
+  useEffect(() => {
+    persistRef.current = persist;
+  }, [persist]);
+
+  const unlockAchievement = useCallback((id: string) => {
+    if (achievementsRef.current.includes(id)) return;
+    const next = [...achievementsRef.current, id];
+    achievementsRef.current = next;
+    setAchievements(next);
+    const title = ACHIEVEMENTS.find((item) => item.id === id)?.title ?? "Новое достижение";
+    flash(`Достижение: ${title}`);
+    window.setTimeout(() => persistRef.current(), 0);
+  }, [flash]);
+
+  const manualSave = (slot: SaveSlotId) => {
+    persist(residentsRef.current, money, reputation, slot, `Первореченское · ${locationName}`);
+    flash(`Игра сохранена: ${slot === "auto" ? "автосохранение" : `слот ${slot.slice(-1)}`}`);
+  };
+
+  const loadSlot = (slot: SaveSlotId) => {
+    const envelope = readEnvelope(slot);
+    if (!envelope) return;
+    localStorage.setItem(ACTIVE_SAVE_KEY, JSON.stringify(envelope.data));
+    window.location.reload();
+  };
+
+  const deleteSlot = (slot: SaveSlotId) => {
+    if (slot === "auto") return;
+    localStorage.removeItem(`${SAVE_SLOT_PREFIX}${slot}`);
+    setSaveSlots((current) => ({ ...current, [slot]: null }));
+    flash(`Слот ${slot.slice(-1)} очищен`);
+  };
+
+  const addMapNote = () => {
+    const text = window.prompt("Короткая заметка для этой точки:");
+    if (!text?.trim()) return;
+    const note: MapNote = { id: `note-${Date.now()}`, text: text.trim().slice(0, 80), x: playerPos.x, z: playerPos.z };
+    const next = [...mapNotesRef.current, note];
+    mapNotesRef.current = next;
+    setMapNotes(next);
+    persistRef.current();
+    flash("Метка добавлена на карту");
+  };
 
   useEffect(() => {
     modeRef.current = mode;
@@ -740,6 +1007,34 @@ export default function SecurityConsoleGame() {
   useEffect(() => {
     weatherRef.current = weather;
   }, [weather]);
+
+  useEffect(() => {
+    profileRef.current = profile;
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  }, [profile]);
+
+  useEffect(() => {
+    statisticsRef.current = statistics;
+  }, [statistics]);
+
+  useEffect(() => {
+    achievementsRef.current = achievements;
+  }, [achievements]);
+
+  useEffect(() => {
+    mapNotesRef.current = mapNotes;
+  }, [mapNotes]);
+
+  useEffect(() => {
+    const onBeforeUnload = () => persist();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [persist]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => queueStatistics(profileRef.current, statisticsRef.current), 300_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     outfitRef.current = outfitId;
@@ -1030,16 +1325,19 @@ export default function SecurityConsoleGame() {
     makeRoadSign("ПЕРВОРЕЧЕНСКОЕ 4 КМ", 3795, -12, true);
 
     const player = makeHero();
-    player.position.set(-4, 0, -3);
+    player.position.set(initialSave.playerPos?.x ?? -4, 0, initialSave.playerPos?.z ?? -3);
     applyOutfit(player, OUTFIT_BY_ID[outfitRef.current]);
     scene.add(player);
     engine.player = player;
 
     const car = makeCar();
-    car.position.set(-13, 0, -5.5);
+    car.position.set(initialSave.carPos?.x ?? -13, 0, initialSave.carPos?.z ?? -5.5);
     car.rotation.y = Math.PI / 2;
     scene.add(car);
     engine.car = car;
+    engine.time = initialSave.gameTime ?? 8.25;
+    engine.fuel = initialSave.carFuel ?? 40;
+    engine.wear = initialSave.carWear ?? 0;
 
     residentsRef.current.forEach((resident) => {
       const npc = makePerson(resident.color);
@@ -1081,11 +1379,15 @@ export default function SecurityConsoleGame() {
 
     let last = performance.now();
     let uiTick = 0;
+    let statisticsTick = 0;
+    let previousGameTime = engine.time;
     let mouseDown = false;
     let lastMouseX = 0;
     let lastMouseY = 0;
 
     const onKeyDown = (e: KeyboardEvent) => {
+      const editingText = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+      if (editingText && e.code !== "Escape") return;
       const action = actionForCode(e.code);
       if (action) engine.keys.add(action);
       if (e.code === "Tab" || e.code === "Space") e.preventDefault();
@@ -1097,10 +1399,30 @@ export default function SecurityConsoleGame() {
 
       if (e.code === "Tab" && modeRef.current === "world") {
         engine.keys.clear();
+        setMode("map");
+        return;
+      }
+      if ((e.code === "Tab" || e.code === "Escape") && modeRef.current === "map") {
+        engine.keys.clear();
+        setMode("world");
+        return;
+      }
+      if (e.code === "KeyP" && modeRef.current === "world") {
+        engine.keys.clear();
         setMode("tablet");
         return;
       }
-      if ((e.code === "Tab" || e.code === "Escape") && modeRef.current === "tablet") {
+      if ((e.code === "KeyP" || e.code === "Escape") && modeRef.current === "tablet") {
+        engine.keys.clear();
+        setMode("world");
+        return;
+      }
+      if (e.code === "Escape" && modeRef.current === "world") {
+        engine.keys.clear();
+        setMode("pause");
+        return;
+      }
+      if (e.code === "Escape" && modeRef.current === "pause") {
         engine.keys.clear();
         setMode("world");
         return;
@@ -1273,6 +1595,7 @@ export default function SecurityConsoleGame() {
           car.position.z = clamp(candidateZ, -195, 195);
           const travelled = Math.abs(engine.carSpeed) * dt;
           engine.odometer += travelled / 1000;
+          statisticsRef.current.kmDriven += travelled / 1000;
           engine.fuel = Math.max(0, engine.fuel - travelled * 0.00006 * (1 + Math.abs(throttle) * 0.18));
         } else {
           const impact = Math.abs(engine.carSpeed);
@@ -1327,6 +1650,7 @@ export default function SecurityConsoleGame() {
           const nextZ = clamp(player.position.z + dz, -195, 195);
           if (!isBlocked(nextX, player.position.z, 0.62, true)) player.position.x = nextX;
           if (!isBlocked(player.position.x, nextZ, 0.62, true)) player.position.z = nextZ;
+          statisticsRef.current.kmWalked += Math.hypot(dx, dz) / 1000;
           player.rotation.y = Math.atan2(dx, dz);
           player.position.y = Math.abs(Math.sin(now * (jogging ? 0.017 : 0.011))) * (jogging ? 0.1 : 0.055);
           const energyCost = (jogging ? 1.5 : fastWalking ? 0.5 : 0.2) * outfit.energy;
@@ -1353,6 +1677,9 @@ export default function SecurityConsoleGame() {
       const isDay = engine.time >= 6 && engine.time < 21;
       engine.time += dt * (isDay ? 15 / 7200 : 9 / 900);
       if (engine.time >= 24) engine.time -= 24;
+      if (previousGameTime < 8 && engine.time >= 8) persistRef.current();
+      previousGameTime = engine.time;
+      if (modeRef.current !== "intro" && modeRef.current !== "pause") statisticsRef.current.playTimeSeconds += dt;
       const dayFactor = clamp(Math.sin(((engine.time - 5.5) / 24) * Math.PI * 2) * 0.65 + 0.45, 0.08, 1);
       const wetWeather = weatherRef.current === "Дождь" || weatherRef.current === "Гроза";
       const cloudFactor = weatherRef.current === "Облачно" ? 0.78 : wetWeather ? 0.58 : 1;
@@ -1444,6 +1771,7 @@ export default function SecurityConsoleGame() {
       camera.lookAt(target);
 
       uiTick += dt;
+      statisticsTick += dt;
       if (uiTick > 0.12) {
         uiTick = 0;
         setEnergy(Math.round(energyRef.current));
@@ -1451,6 +1779,7 @@ export default function SecurityConsoleGame() {
         setNearest(engine.nearest);
         setNearCar(!engine.driving && player.position.distanceTo(car.position) < 5.2);
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
+        setCarPos({ x: car.position.x, z: car.position.z });
         setMovementState(currentMovement);
         setCarTelemetry({
           speed: Math.round(Math.abs(engine.carSpeed) * 3.6),
@@ -1461,6 +1790,13 @@ export default function SecurityConsoleGame() {
         const inDinskaya = focus.position.x > 2000;
         setLocationName(inDinskaya ? "станица Динская" : "Первореченское");
         setDistanceToDinskaya(Math.max(0, Math.round(Math.abs(4000 - focus.position.x) / 100) / 10));
+      }
+      if (statisticsTick > 1) {
+        statisticsTick = 0;
+        statisticsRef.current.maxIncome = Math.max(statisticsRef.current.maxIncome, residentsRef.current.filter((resident) => resident.signed).length * 890);
+        setStatistics({ ...statisticsRef.current });
+        if (statisticsRef.current.kmDriven >= 5) unlockAchievement("road_trip");
+        if (reputation >= 50) unlockAchievement("trusted_manager");
       }
       renderer.render(scene, camera);
     };
@@ -1620,11 +1956,15 @@ export default function SecurityConsoleGame() {
     setShowTariff(false);
     setMode("world");
     setActiveNpcId(null);
+    statisticsRef.current.totalContracts = residentsRef.current.filter((item) => item.signed).length;
+    setStatistics({ ...statisticsRef.current });
     if (resident.mesh) {
       const marker = resident.mesh.getObjectByName("marker") as THREE.Mesh | undefined;
       if (marker) marker.material = mat(0xcce86b);
     }
     persist(residentsRef.current, nextMoney, nextRep);
+    unlockAchievement("first_contract");
+    if (nextRep >= 50) unlockAchievement("trusted_manager");
     flash(`Договор «${TARIFFS[tariffIndex].name}» подписан · +250 ₽ · +8 репутации`);
     if (residentsRef.current.filter((r) => r.signed).length === 10) {
       window.setTimeout(() => flash("Все 10 объектов подключены — пульт охраны открыт!"), 2600);
@@ -1638,6 +1978,7 @@ export default function SecurityConsoleGame() {
       return;
     }
     setOfficeZone("console");
+    persist();
     setMode("office");
     setAlarmResult(demo ? "Учебная смена запущена. Сигнал поступит через секунду." : "Смена началась. Все объекты на связи.");
     setAlarm(null);
@@ -1648,6 +1989,7 @@ export default function SecurityConsoleGame() {
 
   const handleAlarm = (action: string) => {
     if (!alarm) return;
+    statisticsRef.current.alarmsResponded += 1;
     if (action === alarm.correct) {
       const nextMoney = money + 450;
       const nextRep = reputation + 5;
@@ -1655,12 +1997,16 @@ export default function SecurityConsoleGame() {
       setReputation(nextRep);
       setAlarmResult("Клиент подтвердил: во дворе рабочие. Ложная тревога снята · +450 ₽");
       flash("Правильное решение · репутация +5");
+      statisticsRef.current.falseAlarms += 1;
+      statisticsRef.current.successfulPreventions += 1;
+      unlockAchievement("night_owl");
       persist(residentsRef.current, nextMoney, nextRep);
     } else {
       setMoney((v) => Math.max(0, v - 300));
       setAlarmResult("Лишний выезд. Штраф за ложное реагирование · −300 ₽");
       flash("Решение оказалось слишком дорогим");
     }
+    setStatistics({ ...statisticsRef.current });
     setAlarm(null);
     window.setTimeout(() => {
       setAlarm({ type: "Пожарный датчик", address: "Новая, 12 · кухня", correct: "fire" });
@@ -1668,7 +2014,9 @@ export default function SecurityConsoleGame() {
   };
 
   const resetSave = () => {
-    localStorage.removeItem("security-console-save-v1");
+    localStorage.removeItem(LEGACY_SAVE_KEY);
+    localStorage.removeItem(ACTIVE_SAVE_KEY);
+    (["auto", "slot1", "slot2", "slot3"] as SaveSlotId[]).forEach((slot) => localStorage.removeItem(`${SAVE_SLOT_PREFIX}${slot}`));
     window.location.reload();
   };
 
@@ -1683,6 +2031,15 @@ export default function SecurityConsoleGame() {
       : playerPos.x > 3780
         ? 4000
         : Math.round(playerPos.x / 300) * 300;
+  const placeWaypointFromMap = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const xRatio = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
+    const zRatio = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
+    const waypoint = { x: xRatio * 4360 - 180, z: ((50 - zRatio * 100) / 72) * 390, label: "Пользовательская точка" };
+    setMapWaypoint(waypoint);
+    setSelectedMapObject("Маршрут построен. ПКМ по карте перенесёт точку.");
+  };
 
   return (
     <main
@@ -1710,8 +2067,8 @@ export default function SecurityConsoleGame() {
             <div><strong>Пульт охраны</strong><small>{locationName}</small></div>
           </div>
           <div className="hero-card">
-            <div className="hero-avatar">А</div>
-            <div><strong>Алексей</strong><small>Основатель · уровень 1</small></div>
+            <div className={`hero-avatar ${profile.avatar}`}>{profile.nickname.slice(0, 1).toUpperCase()}</div>
+            <div><strong>{profile.nickname}</strong><small>Основатель · уровень {Math.max(1, Math.floor(reputation / 10) + 1)}</small></div>
             <span>Наблюдательность 1/5</span>
           </div>
           <div className="top-status">
@@ -1739,7 +2096,7 @@ export default function SecurityConsoleGame() {
             {driving ? (
               <><kbd>WASD</kbd> вести <kbd>Space</kbd> ручник <kbd>ПКМ</kbd> осмотреться <kbd>E</kbd> выйти</>
             ) : (
-              <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>ПКМ</kbd> камера <kbd>Tab</kbd> планшет</>
+              <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>Tab</kbd> карта <kbd>P</kbd> планшет</>
             )}
           </div>
           <div className="route-card">
@@ -1861,8 +2218,10 @@ export default function SecurityConsoleGame() {
               <button className={`tablet-tab ${tabletTab === "wardrobe" ? "active" : ""}`} onClick={() => setTabletTab("wardrobe")}>Гардероб</button>
               <button className={`tablet-tab ${tabletTab === "clients" ? "active" : ""}`} onClick={() => setTabletTab("clients")}>Жители и договоры</button>
               <button className={`tablet-tab ${tabletTab === "finance" ? "active" : ""}`} onClick={() => setTabletTab("finance")}>Финансы</button>
-              <button className={`tablet-tab ${tabletTab === "map" ? "active" : ""}`} onClick={() => setTabletTab("map")}>Карта и смена</button>
-              <button className="tablet-tab tablet-close" onClick={() => setMode("world")}>← Вернуться в игру</button>
+              <button className={`tablet-tab ${tabletTab === "profile" ? "active" : ""}`} onClick={() => setTabletTab("profile")}>Профиль и статистика</button>
+              <button className={`tablet-tab ${tabletTab === "rating" ? "active" : ""}`} onClick={() => setTabletTab("rating")}>Рейтинг</button>
+              <button className={`tablet-tab ${tabletTab === "saves" ? "active" : ""}`} onClick={() => setTabletTab("saves")}>Сохранения</button>
+              <button className="tablet-tab tablet-close" onClick={() => setMode("world")}>P · Вернуться в игру</button>
             </aside>
             <div className="tablet-content">
               {tabletTab === "hero" && <>
@@ -1952,66 +2311,143 @@ export default function SecurityConsoleGame() {
                   <button className="soft-btn" style={{ color: "#315c45", borderColor: "#bfc8b8" }} onClick={resetSave}>Начать заново</button>
                 </div>
               </>}
-              {tabletTab === "map" && <>
-                <h1>Карта района</h1>
-                <p>Первореченское и станица Динская · маршрут 4 км. Положение Алексея обновляется во время движения.</p>
-                <div className="tablet-map-layout">
-                  <div className="world-map" aria-label="Большая карта района">
-                    <div className="world-map-field north" />
-                    <div className="world-map-field south" />
-                    <div className="world-map-road" />
-                    <div className="world-map-cross first" />
-                    <div className="world-map-cross second" />
-                    <div className="world-map-river" />
-                    <div className="world-village first"><b>Первореченское</b><small>офис · школа · магазин</small></div>
-                    <div className="world-village second"><b>станица Динская</b><small>центр · школа · магазин</small></div>
-                    {residents.map((resident) => (
-                      <span
-                        key={`tablet-house-${resident.id}`}
-                        className={`world-house ${resident.signed ? "signed" : ""}`}
-                        title={`${resident.address}${resident.signed ? " · охраняется" : " · потенциальный клиент"}`}
-                        style={{ left: worldMapX(resident.x), top: worldMapZ(resident.z) }}
-                      />
-                    ))}
-                    {WORLD_KEY_POINTS.map((point) => (
-                      <span
-                        key={`tablet-point-${point.id}`}
-                        className={`world-point world-point-${point.kind}`}
-                        title={point.label}
-                        style={{ left: worldMapX(point.x), top: worldMapZ(point.z) }}
-                      >
-                        {point.short}
-                      </span>
-                    ))}
-                    <span
-                      className="world-player"
-                      title="Алексей"
-                      style={{ left: worldMapX(playerPos.x), top: worldMapZ(playerPos.z) }}
-                    >
-                      А
-                    </span>
+              {tabletTab === "profile" && <>
+                <div className="profile-editor">
+                  <div className={`profile-avatar-large ${profile.avatar}`}>{profile.nickname.slice(0, 1).toUpperCase()}</div>
+                  <div>
+                    <small>Локальный профиль · {typeof navigator !== "undefined" && navigator.onLine ? "сеть доступна" : "автономный режим"}</small>
+                    <h1>{profile.nickname}</h1>
+                    <label>Отображаемое имя<input value={profile.nickname} maxLength={24} onChange={(event) => setProfile({ ...profile, nickname: event.target.value || "Алексей" })} /></label>
                   </div>
-                  <aside className="map-legend">
-                    <h3>Легенда</h3>
-                    <div><i className="legend-player">А</i><span>Алексей</span></div>
-                    <div><i className="legend-point">О</i><span>Ключевая точка</span></div>
-                    <div><i className="legend-house" /><span>Дом клиента</span></div>
-                    <div><i className="legend-house signed" /><span>Дом на охране</span></div>
-                    <div><i className="legend-road" /><span>Основная дорога</span></div>
-                    <small>Текущее место:<br /><b>{locationName}</b></small>
-                  </aside>
                 </div>
-                <div className="map-progress">
-                  <span>Открытие пульта: <b>{signedCount} / 10 договоров</b></span>
-                  <span>{signedCount >= 10 ? "Пульт открыт" : `Осталось ${Math.max(0, 10 - signedCount)}`}</span>
+                <div className="avatar-picker">
+                  {(["avatar_01", "avatar_02", "avatar_03", "avatar_04"] as AvatarId[]).map((avatar) => (
+                    <button key={avatar} className={`avatar-choice ${avatar} ${profile.avatar === avatar ? "active" : ""}`} onClick={() => setProfile({ ...profile, avatar })}>{profile.nickname.slice(0, 1).toUpperCase()}</button>
+                  ))}
+                  <label>Конфиденциальность
+                    <select value={profile.privacy} onChange={(event) => setProfile({ ...profile, privacy: event.target.value as PrivacyMode })}>
+                      <option value="all">Показывать всю статистику</option>
+                      <option value="summary">Только общие показатели</option>
+                      <option value="hidden">Скрыть показатели</option>
+                    </select>
+                  </label>
                 </div>
-                <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
-                  <button className="primary-btn" onClick={() => startOffice(false)}>Начать смену на пульте</button>
-                  <button className="soft-btn" style={{ color: "#315c45", borderColor: "#bfc8b8" }} onClick={() => startOffice(true)}>Учебная тревога</button>
+                <div className="statistics-grid">
+                  <div><span>Контракты</span><b>{statistics.totalContracts}</b></div>
+                  <div><span>Тревоги</span><b>{statistics.alarmsResponded}</b></div>
+                  <div><span>Предотвращения</span><b>{statistics.successfulPreventions}</b></div>
+                  <div><span>Пешком</span><b>{statistics.kmWalked.toFixed(2)} км</b></div>
+                  <div><span>За рулём</span><b>{statistics.kmDriven.toFixed(2)} км</b></div>
+                  <div><span>Рейтинг жителей</span><b>{statistics.citizenRating.toFixed(1)} / 5</b></div>
+                </div>
+                <h2>Достижения</h2>
+                <div className="achievement-grid">
+                  {ACHIEVEMENTS.map((achievement) => (
+                    <article key={achievement.id} className={achievements.includes(achievement.id) ? "unlocked" : ""}>
+                      <i>{achievements.includes(achievement.id) ? "★" : "◇"}</i><b>{achievement.title}</b><small>{achievement.description}</small>
+                    </article>
+                  ))}
+                </div>
+              </>}
+              {tabletTab === "rating" && <>
+                <div className="rating-head">
+                  <div><small>Локальный кэш · готово к синхронизации REST API</small><h1>Таблица лидеров</h1></div>
+                  <select value={leaderboardCategory} onChange={(event) => setLeaderboardCategory(event.target.value as typeof leaderboardCategory)}>
+                    <option value="reputation">Репутация</option><option value="clients">Клиенты</option><option value="income">Доход</option><option value="prevention_rate">Предотвращения</option><option value="level">Уровень</option>
+                  </select>
+                </div>
+                <div className="rating-periods">
+                  {(["all_time", "monthly", "weekly"] as const).map((period) => <button key={period} className={leaderboardPeriod === period ? "active" : ""} onClick={() => setLeaderboardPeriod(period)}>{period === "all_time" ? "Общий" : period === "monthly" ? "Месяц" : "Неделя"}</button>)}
+                </div>
+                <div className="leaderboard-table">
+                  <div className="leaderboard-row header"><span>Место</span><span>Игрок</span><span>Показатель</span><span>Тренд</span></div>
+                  {LEADERBOARD_SEED.map((row) => <div className="leaderboard-row" key={row.playerName}><span>#{row.rank}</span><span><i className={`mini-avatar ${row.avatar}`} />{row.playerName}</span><b>{row.value}</b><span>{row.trend === "up" ? "↑" : row.trend === "down" ? "↓" : "—"}</span></div>)}
+                  <div className="leaderboard-row me"><span>#{Math.max(5, 100 - reputation)}</span><span><i className={`mini-avatar ${profile.avatar}`} />{profile.nickname} · вы</span><b>{leaderboardCategory === "clients" ? signedCount : leaderboardCategory === "income" ? monthlyIncome : reputation}</b><span>↑</span></div>
+                </div>
+                <h2>Сообщество</h2>
+                <div className="community-grid"><div><b>12 846</b><span>договоров</span></div><div><b>3 209</b><span>предотвращений</span></div><div><b>84 720 км</b><span>общий пробег</span></div><div><b>Стандарт</b><span>популярный тариф</span></div></div>
+              </>}
+              {tabletTab === "saves" && <>
+                <h1>Сохранения</h1>
+                <p>Три ручных слота и отдельное автосохранение. Проверка контрольной суммы защищает записи от повреждения.</p>
+                <div className="save-grid">
+                  {(["auto", "slot1", "slot2", "slot3"] as SaveSlotId[]).map((slot) => {
+                    const saved = saveSlots[slot];
+                    return <article className={`save-card ${saved ? "filled" : ""}`} key={slot}>
+                      <small>{slot === "auto" ? "Автосохранение" : `Ручной слот ${slot.slice(-1)}`}</small>
+                      <h3>{saved?.saveName ?? "Пустой слот"}</h3>
+                      <p>{saved ? `${new Date(saved.savedAt).toLocaleString("ru-RU")} · ${saved.data.contracts.length} договоров` : "Здесь ещё нет сохранения."}</p>
+                      <div>{slot !== "auto" && <button onClick={() => manualSave(slot)}>Сохранить</button>}{saved && <button onClick={() => loadSlot(slot)}>Загрузить</button>}{saved && slot !== "auto" && <button className="danger" onClick={() => deleteSlot(slot)}>Удалить</button>}</div>
+                    </article>;
+                  })}
                 </div>
               </>}
             </div>
           </div>
+        </section>
+      )}
+
+      {mode === "map" && (
+        <section className="overlay full-map-overlay">
+          <header className="full-map-head">
+            <div><small>Тактическая карта района</small><h1>Первореченское — станица Динская</h1></div>
+            <div className="map-layer-buttons">
+              <button className={mapLayers.clients ? "active" : ""} onClick={() => setMapLayers({ ...mapLayers, clients: !mapLayers.clients })}>Дома</button>
+              <button className={mapLayers.vehicles ? "active" : ""} onClick={() => setMapLayers({ ...mapLayers, vehicles: !mapLayers.vehicles })}>Транспорт</button>
+              <button className={mapLayers.points ? "active" : ""} onClick={() => setMapLayers({ ...mapLayers, points: !mapLayers.points })}>Объекты</button>
+              <button className={mapLayers.notes ? "active" : ""} onClick={() => setMapLayers({ ...mapLayers, notes: !mapLayers.notes })}>Заметки</button>
+              <button onClick={addMapNote}>+ Метка здесь</button>
+              <button onClick={() => setMode("world")}>Tab · Закрыть</button>
+            </div>
+          </header>
+          <div className="full-map-layout">
+            <div className="world-map expanded" aria-label="Большая интерактивная карта района" onContextMenu={placeWaypointFromMap}>
+              <div className="world-map-field north" /><div className="world-map-field south" />
+              <div className="world-map-road main" /><div className="world-map-road secondary first" /><div className="world-map-road secondary second" />
+              <div className="world-map-road dirt first" /><div className="world-map-road dirt second" />
+              <div className="world-map-road gravel" /><div className="world-map-road footpath" />
+              <div className="world-map-cross first" /><div className="world-map-cross second" /><div className="world-map-river" />
+              <div className="world-village first"><b>Первореченское</b><small>офис · школа · магазин</small></div>
+              <div className="world-village second"><b>станица Динская</b><small>центр · школа · магазин</small></div>
+              {mapLayers.clients && residents.map((resident) => (
+                <button
+                  key={`map-house-${resident.id}`}
+                  className={`world-house ${resident.signed ? "signed" : resident.interest > 30 ? "interested" : ""}`}
+                  title={`${resident.name} · ${resident.address}`}
+                  onClick={() => setSelectedMapObject(`${resident.name} · ${resident.address} · интерес ${resident.interest}% · ${resident.signed ? "под охраной" : "нет договора"}`)}
+                  style={{ left: worldMapX(resident.x), top: worldMapZ(resident.z) }}
+                />
+              ))}
+              {mapLayers.points && WORLD_KEY_POINTS.map((point) => (
+                <button key={`map-point-${point.id}`} className={`world-point world-point-${point.kind}`} title={point.label} onClick={() => { setSelectedMapObject(point.label); setMapWaypoint({ x: point.x, z: point.z, label: point.label }); }} style={{ left: worldMapX(point.x), top: worldMapZ(point.z) }}>{point.short}</button>
+              ))}
+              {mapLayers.notes && mapNotes.map((note) => <button key={note.id} className="world-note" title={note.text} onClick={() => setSelectedMapObject(note.text)} style={{ left: worldMapX(note.x), top: worldMapZ(note.z) }}>⚑</button>)}
+              {mapWaypoint && <span className="world-waypoint" title={mapWaypoint.label} style={{ left: worldMapX(mapWaypoint.x), top: worldMapZ(mapWaypoint.z) }}>◎</span>}
+              {mapWaypoint && <div className="world-route active" />}
+              {mapLayers.vehicles && <span className="world-car" title="Старый седан" style={{ left: worldMapX(carPos.x), top: worldMapZ(carPos.z) }}>◆</span>}
+              <span className="world-player" title={profile.nickname} style={{ left: worldMapX(playerPos.x), top: worldMapZ(playerPos.z) }}>{profile.nickname.slice(0, 1).toUpperCase()}</span>
+            </div>
+            <aside className="map-legend expanded">
+              <h3>Легенда</h3>
+              <div><i className="legend-player">А</i><span>Главный герой</span></div>
+              <div><i className="legend-car">◆</i><span>Личный автомобиль</span></div>
+              <div><i className="legend-house" /><span>Потенциальный клиент</span></div>
+              <div><i className="legend-house signed" /><span>Дом на охране</span></div>
+              <div><i className="legend-road" /><span>Главный асфальт</span></div>
+              <div><i className="legend-dirt" /><span>Грунтовка / гравий</span></div>
+              <div><i className="legend-path" /><span>Пешеходная тропа</span></div>
+              <div><i className="legend-note">⚑</i><span>Личная заметка</span></div>
+              <small>Текущее место:<br /><b>{locationName}</b></small>
+              <p className="map-selection">{selectedMapObject ?? "Нажмите объект для подробностей. ПКМ — поставить точку маршрута."}</p>
+              {mapWaypoint && <div className="route-summary"><b>Маршрут: {mapWaypoint.label}</b><span>≈ {(Math.hypot(mapWaypoint.x - playerPos.x, mapWaypoint.z - playerPos.z) / 1000).toFixed(2)} км</span><small>Пешком ≈ {Math.max(1, Math.round(Math.hypot(mapWaypoint.x - playerPos.x, mapWaypoint.z - playerPos.z) / 100))} мин · на машине быстрее</small><button onClick={() => setMapWaypoint(null)}>Сбросить маршрут</button></div>}
+            </aside>
+          </div>
+        </section>
+      )}
+
+      {mode === "pause" && (
+        <section className="overlay pause-overlay">
+          <div className="pause-card"><small>Игра приостановлена</small><h1>Пульт охраны</h1><button className="primary-btn" onClick={() => setMode("world")}>Продолжить</button><button className="soft-btn" onClick={() => { setTabletTab("saves"); setMode("tablet"); }}>Сохранения</button><button className="soft-btn" onClick={() => manualSave("slot1")}>Быстро сохранить в слот 1</button></div>
         </section>
       )}
 
@@ -2084,6 +2520,10 @@ export default function SecurityConsoleGame() {
                   <div className="office-zone-card passive">
                     <span>◷</span><b>План на смену</b><small>{signedCount}/10 объектов · доход {monthlyIncome.toLocaleString("ru-RU")} ₽/мес.</small>
                   </div>
+                </div>
+                <div className="honor-board">
+                  <div><small>Обновляется раз в игровые сутки</small><h2>Доска почёта менеджеров</h2></div>
+                  {LEADERBOARD_SEED.map((row) => <span key={`board-${row.playerName}`}><b>#{row.rank}</b>{row.playerName}<strong>{row.value} ★</strong></span>)}
                 </div>
               </div>
             )}
