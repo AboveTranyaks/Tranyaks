@@ -252,6 +252,31 @@ kbd {
   font-weight: 800;
 }
 
+.route-card {
+  position: absolute;
+  left: 26px;
+  bottom: 106px;
+  display: grid;
+  gap: 3px;
+  min-width: 224px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(25, 48, 42, 0.88);
+  box-shadow: 0 12px 30px rgba(18, 42, 37, 0.18);
+  color: white;
+  backdrop-filter: blur(13px);
+}
+
+.route-card b {
+  font-size: 12px;
+}
+
+.route-card span {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 10px;
+}
+
 .minimap {
   position: absolute;
   right: 24px;

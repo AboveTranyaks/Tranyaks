@@ -29,6 +29,25 @@ type SaveData = {
   interests: Record<number, number>;
 };
 
+type InputAction = "forward" | "backward" | "left" | "right" | "sprint" | "brake";
+
+type WorldCollider = {
+  x: number;
+  z: number;
+  halfX: number;
+  halfZ: number;
+  kind: "house" | "npc" | "landmark";
+};
+
+type Walker = {
+  mesh: THREE.Group;
+  minX: number;
+  maxX: number;
+  laneZ: number;
+  direction: 1 | -1;
+  speed: number;
+};
+
 const RESIDENT_SEED: Omit<Resident, "interest" | "signed">[] = [
   { id: 1, name: "Семён Петрович", archetype: "Недоверчивый", address: "Садовая, 5", need: "гараж с инструментами", hook: "info", greeting: "Я своими руками сигналку поставлю. Чем ваша лучше?", x: -48, z: 20, color: 0x68809a },
   { id: 2, name: "Мария Ивановна", archetype: "Дружелюбная", address: "Садовая, 8", need: "безопасность семьи", hook: "empathy", greeting: "Охрана — дело хорошее. Но соседи у нас вроде тихие…", x: -24, z: -17, color: 0xd98c72 },
@@ -118,18 +137,18 @@ function makeHouse(
   signed: boolean,
 ) {
   const group = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(9, 5.4, 8), mat(bodyColor));
-  body.position.y = 2.7;
-  const roof = new THREE.Mesh(new THREE.ConeGeometry(7.2, 3.8, 4), mat(signed ? 0x6f9861 : 0xb2614f));
-  roof.position.y = 7.0;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(10, 8.2, 9), mat(bodyColor));
+  body.position.y = 4.1;
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(7.9, 4.2, 4), mat(signed ? 0x6f9861 : 0xb2614f));
+  roof.position.y = 10.1;
   roof.rotation.y = Math.PI / 4;
-  const door = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.7, 0.2), mat(0x76513c));
-  door.position.set(0, 1.45, 4.08);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.8, 3.3, 0.2), mat(0x76513c));
+  door.position.set(0, 1.7, 4.58);
   const windowMat = mat(signed ? 0xcce86b : 0x9ccddd);
-  const window1 = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 0.22), windowMat);
-  window1.position.set(-2.5, 3.2, 4.1);
+  const window1 = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.8, 0.22), windowMat);
+  window1.position.set(-2.8, 4.3, 4.6);
   const window2 = window1.clone();
-  window2.position.x = 2.5;
+  window2.position.x = 2.8;
   group.add(body, roof, door, window1, window2);
   group.position.set(x, 0, z);
   group.rotation.y = z > 0 ? Math.PI : 0;
@@ -145,13 +164,23 @@ function makeHouse(
 
 function makePerson(color: number) {
   const group = new THREE.Group();
-  const legs = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.72, 1.8, 6), mat(0x385064));
-  legs.position.y = 0.9;
+  const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.31, 1.75, 6), mat(0x385064));
+  leftLeg.position.set(-0.33, 0.9, 0);
+  leftLeg.name = "leftLeg";
+  const rightLeg = leftLeg.clone();
+  rightLeg.position.x = 0.33;
+  rightLeg.name = "rightLeg";
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.92, 2.0, 7), mat(color));
   body.position.y = 2.65;
   const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.67, 1), mat(0xe2b883));
   head.position.y = 4.15;
-  group.add(legs, body, head);
+  const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 1.55, 6), mat(0xe2b883));
+  leftArm.position.set(-0.95, 2.7, 0);
+  leftArm.name = "leftArm";
+  const rightArm = leftArm.clone();
+  rightArm.position.x = 0.95;
+  rightArm.name = "rightArm";
+  group.add(leftLeg, rightLeg, body, head, leftArm, rightArm);
   group.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;
   });
@@ -225,6 +254,36 @@ function animateHero(hero: THREE.Group, moving: boolean, now: number, sprinting:
   if (rightArm) rightArm.rotation.x = stride * 0.72;
 }
 
+function actionForCode(code: string): InputAction | null {
+  if (code === "KeyW") return "forward";
+  if (code === "KeyS") return "backward";
+  if (code === "KeyA") return "left";
+  if (code === "KeyD") return "right";
+  if (code === "ShiftLeft" || code === "ShiftRight") return "sprint";
+  if (code === "Space") return "brake";
+  return null;
+}
+
+function personWalkCycle(person: THREE.Group, moving: boolean, now: number, phase = 0) {
+  const stride = moving ? Math.sin(now * 0.008 + phase) * 0.55 : Math.sin(now * 0.0015 + phase) * 0.04;
+  const leftLeg = person.getObjectByName("leftLeg");
+  const rightLeg = person.getObjectByName("rightLeg");
+  const leftArm = person.getObjectByName("leftArm");
+  const rightArm = person.getObjectByName("rightArm");
+  if (leftLeg) leftLeg.rotation.x = stride;
+  if (rightLeg) rightLeg.rotation.x = -stride;
+  if (leftArm) leftArm.rotation.x = -stride * 0.7;
+  if (rightArm) rightArm.rotation.x = stride * 0.7;
+}
+
+function touchesBox(x: number, z: number, radius: number, collider: WorldCollider) {
+  const nearestX = clamp(x, collider.x - collider.halfX, collider.x + collider.halfX);
+  const nearestZ = clamp(z, collider.z - collider.halfZ, collider.z + collider.halfZ);
+  const dx = x - nearestX;
+  const dz = z - nearestZ;
+  return dx * dx + dz * dz < radius * radius;
+}
+
 function makeCar() {
   const group = new THREE.Group();
   const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 6.2), mat(0xc85f4c));
@@ -262,6 +321,8 @@ export default function SecurityConsoleGame() {
     driving: boolean;
     carSpeed: number;
     residents: Resident[];
+    colliders: WorldCollider[];
+    walkers: Walker[];
     nearest: Resident | null;
     time: number;
     yaw: number;
@@ -272,6 +333,8 @@ export default function SecurityConsoleGame() {
     driving: false,
     carSpeed: 0,
     residents: [],
+    colliders: [],
+    walkers: [],
     nearest: null,
     time: 8.25,
     yaw: Math.PI,
@@ -296,6 +359,8 @@ export default function SecurityConsoleGame() {
   const [showTariff, setShowTariff] = useState(false);
   const [tabletTab, setTabletTab] = useState<"hero" | "clients" | "finance" | "map">("hero");
   const [playerPos, setPlayerPos] = useState({ x: -4, z: -2 });
+  const [locationName, setLocationName] = useState<"Первореченское" | "станица Динская">("Первореченское");
+  const [distanceToDinskaya, setDistanceToDinskaya] = useState(4);
   const [weather, setWeather] = useState<"Ясно" | "Облачно" | "Дождь">("Ясно");
   const [alarm, setAlarm] = useState<null | { type: string; address: string; correct: string }>(null);
   const [alarmResult, setAlarmResult] = useState("Система в норме. Ожидаем сигнал.");
@@ -349,10 +414,10 @@ export default function SecurityConsoleGame() {
     const engine = engineRef.current;
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x91bfc1);
-    scene.fog = new THREE.Fog(0x91bfc1, 75, 185);
+    scene.fog = new THREE.Fog(0x91bfc1, 170, 900);
     engine.scene = scene;
 
-    const camera = new THREE.PerspectiveCamera(52, mount.clientWidth / mount.clientHeight, 0.1, 500);
+    const camera = new THREE.PerspectiveCamera(52, mount.clientWidth / mount.clientHeight, 0.1, 6000);
     engine.camera = camera;
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
@@ -379,16 +444,24 @@ export default function SecurityConsoleGame() {
     sun.shadow.camera.bottom = -110;
     scene.add(sun);
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(240, 190), mat(0x8fb277));
+    engine.colliders = [];
+    engine.walkers = [];
+
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 420), mat(0x8fb277));
     ground.rotation.x = -Math.PI / 2;
+    ground.position.x = 1950;
     ground.receiveShadow = true;
     scene.add(ground);
 
-    box(scene, [220, 0.18, 13], [0, 0.1, 0], 0xa9a49a, -0.035);
-    box(scene, [13, 0.19, 130], [18, 0.12, 26], 0xb7ad98, 0.07);
-    box(scene, [9, 0.2, 65], [-42, 0.13, 29], 0xc2ae8a, -0.08);
-    for (let x = -98; x < 105; x += 10) {
-      box(scene, [5, 0.03, 0.28], [x, 0.23, -0.3 - x * 0.035], 0xe1ded4, -0.035);
+    // Four-kilometre route and straight centre markings.
+    box(scene, [4300, 0.18, 14], [1950, 0.1, 0], 0xa9a49a);
+    for (let x = -145; x <= 4145; x += 14) {
+      box(scene, [6, 0.03, 0.28], [x, 0.23, 0], 0xe9e5da);
+    }
+    for (const centreX of [0, 4000]) {
+      box(scene, [13, 0.19, 350], [centreX + 18, 0.12, 15], 0xb7ad98);
+      box(scene, [260, 0.19, 10], [centreX, 0.13, 72], 0xb7ad98);
+      box(scene, [220, 0.19, 9], [centreX, 0.13, -72], 0xc2ae8a);
     }
 
     const riverMat = new THREE.MeshStandardMaterial({
@@ -399,29 +472,56 @@ export default function SecurityConsoleGame() {
       opacity: 0.92,
     });
     const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-118, 0.2, 62),
-      new THREE.Vector3(-80, 0.2, 48),
-      new THREE.Vector3(-42, 0.2, 66),
-      new THREE.Vector3(0, 0.2, 78),
-      new THREE.Vector3(47, 0.2, 66),
-      new THREE.Vector3(118, 0.2, 82),
+      new THREE.Vector3(-175, 0.18, 184),
+      new THREE.Vector3(-105, 0.18, 172),
+      new THREE.Vector3(-35, 0.18, 188),
+      new THREE.Vector3(38, 0.18, 176),
+      new THREE.Vector3(108, 0.18, 190),
+      new THREE.Vector3(175, 0.18, 181),
     ]);
     const river = new THREE.Mesh(new THREE.TubeGeometry(curve, 80, 6.5, 8, false), riverMat);
     scene.add(river);
 
-    for (let i = 0; i < 62; i++) {
-      const side = i % 2 === 0 ? -1 : 1;
-      const x = -112 + ((i * 31) % 224);
-      const z = side * (60 + ((i * 17) % 25));
-      makeTree(scene, x, z, 0.75 + ((i * 9) % 7) / 14);
+    // Trees stay on dry land; none are generated inside the river corridor.
+    for (let i = 0; i < 96; i++) {
+      const villageX = i < 48 ? 0 : 4000;
+      const localX = -165 + ((i * 37) % 330);
+      const z = -168 - ((i * 13) % 20);
+      makeTree(scene, villageX + localX, z, 0.72 + ((i * 9) % 7) / 14);
+    }
+    for (let x = 260; x < 3740; x += 120) {
+      makeTree(scene, x, -27, 0.72);
+      makeTree(scene, x + 48, 29, 0.8);
     }
 
     const houses: [number, number][] = residentsRef.current.map((r) => [r.x, r.z]);
     houses.forEach(([x, z], i) => {
       const colors = [0xe1b47d, 0xd89073, 0xd6c98a, 0x8eaf9a, 0xc7a3a3];
       makeHouse(scene, x, z, colors[i % colors.length], residentsRef.current[i].signed);
+      engine.colliders.push({ x, z, halfX: 5.4, halfZ: 4.9, kind: "house" });
       box(scene, [13, 0.42, 0.28], [x, 0.5, z + (z > 0 ? -6.4 : 6.4)], 0x806f55);
     });
+
+    const houseColors = [0xe1b47d, 0xd89073, 0xd6c98a, 0x8eaf9a, 0xc7a3a3, 0x9bb8c2];
+    const addNeighbourhood = (centreX: number, count: number, startIndex: number) => {
+      const candidates: [number, number][] = [];
+      const columns = [-145, -116, -87, -58, -29, 0, 29, 58, 87, 116, 145];
+      const rows = [-150, -116, -84, -42, 42, 84, 116, 150];
+      for (const z of rows) {
+        for (const localX of columns) candidates.push([centreX + localX, z]);
+      }
+      let added = 0;
+      for (const [x, z] of candidates) {
+        if (added >= count) break;
+        const overlapsLead = houses.some(([hx, hz]) => Math.hypot(x - hx, z - hz) < 15);
+        if (centreX === 0 && overlapsLead) continue;
+        makeHouse(scene, x, z, houseColors[(startIndex + added) % houseColors.length], false);
+        engine.colliders.push({ x, z, halfX: 5.4, halfZ: 4.9, kind: "house" });
+        added += 1;
+      }
+    };
+    addNeighbourhood(0, 40, 10);
+    addNeighbourhood(4000, 50, 50);
 
     // Центр посёлка: магазин, школа, остановка и детская площадка.
     box(scene, [15, 5.4, 10], [3, 2.7, -22], 0xe0b56f);
@@ -475,6 +575,52 @@ export default function SecurityConsoleGame() {
     );
     sign.position.set(92, 6.2, -11.08);
     scene.add(sign);
+    engine.colliders.push(
+      { x: 3, z: -22, halfX: 8, halfZ: 5.5, kind: "landmark" },
+      { x: -72, z: 34, halfX: 12, halfZ: 6.5, kind: "landmark" },
+      { x: 92, z: -18, halfX: 9.5, halfZ: 7, kind: "landmark" },
+    );
+
+    // The second settlement has its own recognisable centre.
+    box(scene, [18, 6.4, 12], [4000, 3.2, -24], 0xd9b36f);
+    box(scene, [19.5, 1.0, 13.5], [4000, 6.85, -24], 0x76564b);
+    box(scene, [2.2, 3.2, 0.3], [4000, 1.65, -17.85], 0x6e4c35);
+    box(scene, [24, 7.2, 13], [3928, 3.6, 42], 0xd4ca98);
+    box(scene, [25.5, 1.2, 14.5], [3928, 7.35, 42], 0x557d68);
+    engine.colliders.push(
+      { x: 4000, z: -24, halfX: 9.5, halfZ: 6.5, kind: "landmark" },
+      { x: 3928, z: 42, halfX: 12.5, halfZ: 7, kind: "landmark" },
+    );
+
+    const makeRoadSign = (text: string, x: number, z: number, faceWest = false) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 128;
+      const signCtx = canvas.getContext("2d");
+      if (signCtx) {
+        signCtx.fillStyle = "#f4efe0";
+        signCtx.fillRect(0, 0, canvas.width, canvas.height);
+        signCtx.strokeStyle = "#263f37";
+        signCtx.lineWidth = 14;
+        signCtx.strokeRect(7, 7, canvas.width - 14, canvas.height - 14);
+        signCtx.fillStyle = "#263f37";
+        signCtx.font = "bold 50px Arial";
+        signCtx.textAlign = "center";
+        signCtx.fillText(text, canvas.width / 2, 82);
+      }
+      const texture = new THREE.CanvasTexture(canvas);
+      const board = new THREE.Mesh(
+        new THREE.PlaneGeometry(10, 2),
+        new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }),
+      );
+      board.position.set(x, 4.2, z);
+      board.rotation.y = faceWest ? -Math.PI / 2 : Math.PI / 2;
+      scene.add(board);
+      box(scene, [0.22, 4, 0.22], [x, 2, z - 3.5], 0x33423d);
+      box(scene, [0.22, 4, 0.22], [x, 2, z + 3.5], 0x33423d);
+    };
+    makeRoadSign("ДИНСКАЯ 4 КМ", 205, -12);
+    makeRoadSign("ПЕРВОРЕЧЕНСКОЕ 4 КМ", 3795, -12, true);
 
     const player = makeHero();
     player.position.set(-4, 0, -3);
@@ -503,6 +649,28 @@ export default function SecurityConsoleGame() {
     });
     engine.residents = residentsRef.current;
 
+    const walkerColors = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
+    for (const villageX of [0, 4000]) {
+      for (let i = 0; i < 12; i++) {
+        const walker = makePerson(walkerColors[i % walkerColors.length]);
+        const laneZ = i % 2 === 0 ? -10.5 : 10.5;
+        const minX = villageX - 150;
+        const maxX = villageX + 150;
+        const direction = (i % 3 === 0 ? -1 : 1) as 1 | -1;
+        walker.position.set(minX + ((i * 29) % 280), 0, laneZ);
+        walker.rotation.y = direction > 0 ? Math.PI / 2 : -Math.PI / 2;
+        scene.add(walker);
+        engine.walkers.push({
+          mesh: walker,
+          minX,
+          maxX,
+          laneZ,
+          direction,
+          speed: 0.75 + (i % 4) * 0.14,
+        });
+      }
+    }
+
     let last = performance.now();
     let uiTick = 0;
     let mouseDown = false;
@@ -510,24 +678,27 @@ export default function SecurityConsoleGame() {
     let lastMouseY = 0;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      engine.keys.add(key);
-      if (["tab", " "].includes(key)) e.preventDefault();
+      const action = actionForCode(e.code);
+      if (action) engine.keys.add(action);
+      if (e.code === "Tab" || e.code === "Space") e.preventDefault();
 
-      if (key === "tab" && modeRef.current === "world") {
+      if (e.code === "Tab" && modeRef.current === "world") {
+        engine.keys.clear();
         setMode("tablet");
         return;
       }
-      if ((key === "tab" || key === "escape") && modeRef.current === "tablet") {
+      if ((e.code === "Tab" || e.code === "Escape") && modeRef.current === "tablet") {
+        engine.keys.clear();
         setMode("world");
         return;
       }
-      if (key === "escape" && modeRef.current === "dialogue") {
+      if (e.code === "Escape" && modeRef.current === "dialogue") {
+        engine.keys.clear();
         setMode("world");
         setActiveNpcId(null);
         return;
       }
-      if (key === "e" && modeRef.current === "world") {
+      if (e.code === "KeyE" && modeRef.current === "world" && !e.repeat) {
         const focus = engine.driving ? engine.car : engine.player;
         if (!focus) return;
         if (!engine.driving && engine.car && focus.position.distanceTo(engine.car.position) < 5.2) {
@@ -551,12 +722,12 @@ export default function SecurityConsoleGame() {
           setMode("dialogue");
         }
       }
-      if (modeRef.current === "dialogue" && ["1", "2", "3", "4"].includes(key)) {
-        const index = Number(key) - 1;
+      if (modeRef.current === "dialogue" && ["Digit1", "Digit2", "Digit3", "Digit4"].includes(e.code)) {
+        const index = Number(e.code.slice(-1)) - 1;
         const button = document.querySelector<HTMLButtonElement>(`[data-choice="${index}"]`);
         button?.click();
       }
-      if (key === "h" && engine.driving) {
+      if (e.code === "KeyH" && engine.driving && !e.repeat) {
         try {
           const audio = new AudioContext();
           const oscillator = audio.createOscillator();
@@ -573,7 +744,14 @@ export default function SecurityConsoleGame() {
       }
     };
 
-    const onKeyUp = (e: KeyboardEvent) => engine.keys.delete(e.key.toLowerCase());
+    const clearInput = () => engine.keys.clear();
+    const onKeyUp = (e: KeyboardEvent) => {
+      const action = actionForCode(e.code);
+      if (action) engine.keys.delete(action);
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) clearInput();
+    };
     const onMouseDown = (e: MouseEvent) => {
       if (e.button === 2) {
         mouseDown = true;
@@ -600,12 +778,30 @@ export default function SecurityConsoleGame() {
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", clearInput);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     window.addEventListener("resize", onResize);
     renderer.domElement.addEventListener("mousedown", onMouseDown);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: true });
     renderer.domElement.addEventListener("contextmenu", onContextMenu);
+
+    const isBlocked = (x: number, z: number, radius: number, includeCar: boolean) => {
+      if (engine.colliders.some((collider) => touchesBox(x, z, radius, collider))) return true;
+      for (const resident of engine.residents) {
+        if (resident.mesh && Math.hypot(x - resident.mesh.position.x, z - resident.mesh.position.z) < radius + 0.78) {
+          return true;
+        }
+      }
+      for (const walker of engine.walkers) {
+        if (Math.hypot(x - walker.mesh.position.x, z - walker.mesh.position.z) < radius + 0.72) {
+          return true;
+        }
+      }
+      if (includeCar && Math.hypot(x - car.position.x, z - car.position.z) < radius + 2.25) return true;
+      return false;
+    };
 
     let animation = 0;
     const animate = (now: number) => {
@@ -616,30 +812,39 @@ export default function SecurityConsoleGame() {
       const focus = engine.driving ? car : player;
 
       if (canMove && engine.driving) {
-        const throttle = (engine.keys.has("w") ? 1 : 0) - (engine.keys.has("s") ? 1 : 0);
-        const steer = (engine.keys.has("a") ? 1 : 0) - (engine.keys.has("d") ? 1 : 0);
+        const throttle = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
+        const steer = (engine.keys.has("left") ? 1 : 0) - (engine.keys.has("right") ? 1 : 0);
         engine.carSpeed += throttle * 18 * dt;
-        engine.carSpeed *= engine.keys.has(" ") ? Math.pow(0.25, dt * 6) : Math.pow(0.55, dt);
+        engine.carSpeed *= engine.keys.has("brake") ? Math.pow(0.25, dt * 6) : Math.pow(0.55, dt);
         engine.carSpeed = clamp(engine.carSpeed, -9, 26);
         if (Math.abs(engine.carSpeed) > 0.35) {
           car.rotation.y += steer * dt * 1.45 * Math.sign(engine.carSpeed) * clamp(Math.abs(engine.carSpeed) / 8, 0.4, 1);
         }
-        car.translateZ(engine.carSpeed * dt);
-        car.position.x = clamp(car.position.x, -112, 112);
-        car.position.z = clamp(car.position.z, -55, 68);
+        const carDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(car.quaternion);
+        const candidateX = car.position.x + carDirection.x * engine.carSpeed * dt;
+        const candidateZ = car.position.z + carDirection.z * engine.carSpeed * dt;
+        if (!isBlocked(candidateX, candidateZ, 2.25, false)) {
+          car.position.x = clamp(candidateX, -180, 4180);
+          car.position.z = clamp(candidateZ, -195, 195);
+        } else {
+          engine.carSpeed *= -0.16;
+        }
         engine.yaw = THREE.MathUtils.lerp(engine.yaw, car.rotation.y + Math.PI, dt * 1.2);
       } else if (canMove) {
-        const forward = (engine.keys.has("w") ? 1 : 0) - (engine.keys.has("s") ? 1 : 0);
-        const side = (engine.keys.has("d") ? 1 : 0) - (engine.keys.has("a") ? 1 : 0);
+        const forward = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
+        const side = (engine.keys.has("right") ? 1 : 0) - (engine.keys.has("left") ? 1 : 0);
         const moving = Math.abs(forward) + Math.abs(side) > 0;
-        const sprinting = moving && engine.keys.has("shift") && energyRef.current > 0.5;
-        const speed = sprinting ? 12.5 : energyRef.current <= 0 ? 3.4 : 6.3;
+        const sprinting = moving && engine.keys.has("sprint") && energyRef.current > 0.5;
+        const speed = sprinting ? 5 : energyRef.current <= 0 ? 1.25 : 2;
         if (moving) {
           const angle = engine.yaw;
-          const dx = (Math.sin(angle) * forward + Math.cos(angle) * side) * speed * dt;
-          const dz = (Math.cos(angle) * forward - Math.sin(angle) * side) * speed * dt;
-          player.position.x = clamp(player.position.x + dx, -112, 112);
-          player.position.z = clamp(player.position.z + dz, -55, 68);
+          const length = Math.max(1, Math.hypot(forward, side));
+          const dx = ((-Math.sin(angle) * forward + Math.cos(angle) * side) / length) * speed * dt;
+          const dz = ((-Math.cos(angle) * forward - Math.sin(angle) * side) / length) * speed * dt;
+          const nextX = clamp(player.position.x + dx, -180, 4180);
+          const nextZ = clamp(player.position.z + dz, -195, 195);
+          if (!isBlocked(nextX, player.position.z, 0.62, true)) player.position.x = nextX;
+          if (!isBlocked(player.position.x, nextZ, 0.62, true)) player.position.z = nextZ;
           player.rotation.y = Math.atan2(dx, dz);
           player.position.y = Math.abs(Math.sin(now * 0.012)) * 0.08;
           if (sprinting) {
@@ -656,7 +861,9 @@ export default function SecurityConsoleGame() {
         }
       }
 
-      engine.time += dt * 0.085;
+      // 06:00–21:00 lasts two real hours; the nine-hour night lasts 15 minutes.
+      const isDay = engine.time >= 6 && engine.time < 21;
+      engine.time += dt * (isDay ? 15 / 7200 : 9 / 900);
       if (engine.time >= 24) engine.time -= 24;
       const dayFactor = clamp(Math.sin(((engine.time - 5.5) / 24) * Math.PI * 2) * 0.65 + 0.45, 0.08, 1);
       sun.intensity = 0.35 + dayFactor * 2.7;
@@ -670,8 +877,20 @@ export default function SecurityConsoleGame() {
       engine.residents.forEach((resident, i) => {
         if (!resident.mesh) return;
         resident.mesh.rotation.y = Math.sin(now * 0.0004 + i) * 0.35;
+        personWalkCycle(resident.mesh, false, now, i);
         const marker = resident.mesh.getObjectByName("marker");
         if (marker) marker.position.y = 5.7 + Math.sin(now * 0.003 + i) * 0.18;
+      });
+      engine.walkers.forEach((walker, i) => {
+        const nextX = walker.mesh.position.x + walker.direction * walker.speed * dt;
+        if (nextX <= walker.minX || nextX >= walker.maxX) {
+          walker.direction = walker.direction === 1 ? -1 : 1;
+        } else {
+          walker.mesh.position.x = nextX;
+        }
+        walker.mesh.position.z = walker.laneZ;
+        walker.mesh.rotation.y = walker.direction > 0 ? Math.PI / 2 : -Math.PI / 2;
+        personWalkCycle(walker.mesh, true, now, i * 0.7);
       });
 
       if (canMove && !engine.driving) {
@@ -708,6 +927,9 @@ export default function SecurityConsoleGame() {
         setGameTime(engine.time);
         setNearest(engine.nearest);
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
+        const inDinskaya = focus.position.x > 2000;
+        setLocationName(inDinskaya ? "станица Динская" : "Первореченское");
+        setDistanceToDinskaya(Math.max(0, Math.round(Math.abs(4000 - focus.position.x) / 100) / 10));
       }
       renderer.render(scene, camera);
     };
@@ -717,6 +939,8 @@ export default function SecurityConsoleGame() {
       cancelAnimationFrame(animation);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", clearInput);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("resize", onResize);
@@ -819,6 +1043,7 @@ export default function SecurityConsoleGame() {
     const minute = Math.floor((gameTime - hour) * 60);
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   }, [gameTime]);
+  const mapCenterX = locationName === "станица Динская" ? 4000 : 0;
 
   return (
     <main className="game-shell" aria-label="Игра Пульт охраны">
@@ -828,7 +1053,7 @@ export default function SecurityConsoleGame() {
         <div className="hud" aria-hidden={mode !== "world"}>
           <div className="brand">
             <div className="brand-mark">⌂</div>
-            <div><strong>Пульт охраны</strong><small>ПервоРеченское</small></div>
+            <div><strong>Пульт охраны</strong><small>{locationName}</small></div>
           </div>
           <div className="hero-card">
             <div className="hero-avatar">А</div>
@@ -848,18 +1073,22 @@ export default function SecurityConsoleGame() {
           <div className="controls-hint">
             <kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>ПКМ</kbd> камера <kbd>Tab</kbd> планшет
           </div>
+          <div className="route-card">
+            <b>{locationName}</b>
+            <span>{locationName === "Первореченское" ? `До станицы Динской: ${distanceToDinskaya.toFixed(1)} км` : "Маршрут Первореченское — 4 км"}</span>
+          </div>
           <div className="minimap" aria-label="Миникарта">
             <span className="compass-n">С</span>
-            <div className="map-river" />
+            {locationName === "Первореченское" && <div className="map-river" />}
             <div className="map-road" />
             <div className="map-road vertical" />
-            {residents.map((r) => (
+            {locationName === "Первореченское" && residents.map((r) => (
               <span key={`h-${r.id}`} className={`map-home ${r.signed ? "signed" : ""}`} style={{ left: mapPos(r.x, 120), top: mapPos(r.z, 90) }} />
             ))}
-            {residents.filter((r) => !r.signed).map((r) => (
+            {locationName === "Первореченское" && residents.filter((r) => !r.signed).map((r) => (
               <span key={`n-${r.id}`} className="map-npc" style={{ left: mapPos(r.x + 5, 120), top: mapPos(r.z + (r.z > 0 ? -5 : 5), 90) }} />
             ))}
-            <span className="map-player" style={{ left: mapPos(playerPos.x, 120), top: mapPos(playerPos.z, 90) }} />
+            <span className="map-player" style={{ left: mapPos(playerPos.x - mapCenterX, 180), top: mapPos(playerPos.z, 190) }} />
           </div>
           {mode === "world" && (nearest || (driving && Math.abs(engineRef.current.carSpeed) < 1.2)) && (
             <div className="interaction-prompt">
@@ -879,7 +1108,7 @@ export default function SecurityConsoleGame() {
           <div className="intro-copy">
             <div className="eyebrow">● Играбельный low-poly прототип</div>
             <h1>Пульт <em>охраны</em></h1>
-            <p>Алексей вернулся из города в родной посёлок у реки. Здесь десять домов, знакомые с детства улицы и одна цель: заслужить доверие жителей и открыть собственный пульт наблюдения.</p>
+            <p>Алексей вернулся в Первореченское. Впереди два посёлка, сто домов, четыре километра дороги и одна цель: заслужить доверие жителей и открыть собственный пульт наблюдения.</p>
             <div className="intro-actions">
               <button className="primary-btn" onClick={() => setMode("world")}>Выйти в посёлок →</button>
               <button className="soft-btn" onClick={() => startOffice(true)}>Демо пульта</button>
