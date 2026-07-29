@@ -5,6 +5,11 @@ import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
 type GameMode = "intro" | "world" | "dialogue" | "tablet" | "tariff" | "office";
+type OutfitId = "casual" | "manager" | "operator" | "rain";
+type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
+type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
+type SurfaceKind = "Асфальт" | "Грунт" | "Трава";
+type MovementState = "Покой" | "Шаг" | "Быстрый шаг" | "Бег трусцой";
 
 type Resident = {
   id: number;
@@ -27,6 +32,9 @@ type SaveData = {
   reputation: number;
   contracts: number[];
   interests: Record<number, number>;
+  outfit?: OutfitId;
+  ownedOutfits?: OutfitId[];
+  carUpgrade?: number;
 };
 
 type InputAction = "forward" | "backward" | "left" | "right" | "sprint" | "brake";
@@ -46,6 +54,26 @@ type Walker = {
   laneZ: number;
   direction: 1 | -1;
   speed: number;
+};
+
+type Outfit = {
+  id: OutfitId;
+  name: string;
+  subtitle: string;
+  description: string;
+  preview: string;
+  price: number;
+  trust: number;
+  speed: number;
+  energy: number;
+  ground: number;
+  top: number;
+  outer: number;
+  pants: number;
+  shoes: number;
+  hat?: boolean;
+  glasses?: boolean;
+  badge?: boolean;
 };
 
 const RESIDENT_SEED: Omit<Resident, "interest" | "signed">[] = [
@@ -82,14 +110,98 @@ const WORLD_KEY_POINTS = [
   { id: "dinskaya", label: "Центр станицы Динской", short: "Д", x: 4000, z: -24, kind: "village" },
 ] as const;
 
+const OUTFITS: Outfit[] = [
+  {
+    id: "casual",
+    name: "Свой парень",
+    subtitle: "Толстовка, джинсы, кроссовки",
+    description: "Удобный комплект для долгих обходов и разговоров по-соседски.",
+    preview: "linear-gradient(145deg, #b7cba1, #e9d7aa)",
+    price: 0,
+    trust: 3,
+    speed: 1.03,
+    energy: 0.95,
+    ground: 1,
+    top: 0x315c45,
+    outer: 0x425b61,
+    pants: 0x26394d,
+    shoes: 0xf0eee7,
+    hat: true,
+  },
+  {
+    id: "manager",
+    name: "Классический менеджер",
+    subtitle: "Пиджак, брюки, туфли и очки",
+    description: "Деловой образ повышает доверие, но не любит грязные просёлки.",
+    preview: "linear-gradient(145deg, #9bafba, #ddd4c3)",
+    price: 5000,
+    trust: 10,
+    speed: 0.96,
+    energy: 1.05,
+    ground: 1,
+    top: 0xf0eee7,
+    outer: 0x26394d,
+    pants: 0x2d3541,
+    shoes: 0x241d1a,
+    glasses: true,
+    badge: true,
+  },
+  {
+    id: "operator",
+    name: "Оперативник ГБР",
+    subtitle: "Форма, разгрузка и трекинговые ботинки",
+    description: "Практичная форма для тревожных выездов и уверенного шага по грунту.",
+    preview: "linear-gradient(145deg, #78917f, #b7b99c)",
+    price: 8500,
+    trust: 8,
+    speed: 1.01,
+    energy: 0.98,
+    ground: 1.05,
+    top: 0x31526d,
+    outer: 0x253d35,
+    pants: 0x26302d,
+    shoes: 0x3d332b,
+    hat: true,
+    badge: true,
+  },
+  {
+    id: "rain",
+    name: "Дождевой патруль",
+    subtitle: "Ветровка, резиновые ботинки и кепка",
+    description: "Лёгкая защита от непогоды с хорошим сцеплением на мокрой траве.",
+    preview: "linear-gradient(145deg, #6e9692, #d5bd79)",
+    price: 2600,
+    trust: 4,
+    speed: 0.98,
+    energy: 0.94,
+    ground: 1.08,
+    top: 0x557d68,
+    outer: 0xd39a4b,
+    pants: 0x33475a,
+    shoes: 0x27312d,
+    hat: true,
+  },
+];
+
+const OUTFIT_BY_ID = Object.fromEntries(OUTFITS.map((outfit) => [outfit.id, outfit])) as Record<OutfitId, Outfit>;
+
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const mapPos = (value: number, extent: number) => `${50 + (value / extent) * 44}%`;
 const worldMapX = (x: number) => `${clamp(((x + 180) / 4360) * 100, 2, 98)}%`;
 const worldMapZ = (z: number) => `${clamp(50 - (z / 390) * 72, 8, 92)}%`;
 
+function surfaceAt(x: number, z: number): SurfaceKind {
+  if (Math.abs(z) <= 8) return "Асфальт";
+  for (const centre of [0, 4000]) {
+    if (Math.abs(x - (centre + 18)) <= 7 && z > -165 && z < 190) return "Асфальт";
+    if (Math.abs(x - centre) <= 132 && (Math.abs(z - 72) <= 6 || Math.abs(z + 72) <= 5.5)) return "Грунт";
+  }
+  return "Трава";
+}
+
 function readSave(): SaveData {
   if (typeof window === "undefined") {
-    return { money: 5000, reputation: 0, contracts: [], interests: {} };
+    return { money: 5000, reputation: 0, contracts: [], interests: {}, outfit: "casual", ownedOutfits: ["casual"], carUpgrade: 0 };
   }
   try {
     const raw = localStorage.getItem("security-console-save-v1");
@@ -97,7 +209,15 @@ function readSave(): SaveData {
   } catch {
     // A clean start is safer than a broken save.
   }
-  return { money: 5000, reputation: 0, contracts: [], interests: {} };
+  return { money: 5000, reputation: 0, contracts: [], interests: {}, outfit: "casual", ownedOutfits: ["casual"], carUpgrade: 0 };
+}
+
+function residentsFromSave(save: SaveData): Resident[] {
+  return RESIDENT_SEED.map((resident) => ({
+    ...resident,
+    interest: save.interests[resident.id] ?? 38 + ((resident.id * 7) % 13),
+    signed: save.contracts.includes(resident.id),
+  }));
 }
 
 function mat(color: number, roughness = 0.86) {
@@ -205,8 +325,10 @@ function makeHouse(
   const windowMat = mat(signed ? 0xcce86b : 0x9ccddd);
   const window1 = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.8, 0.22), windowMat);
   window1.position.set(-2.8, 4.3, 4.6);
+  window1.name = "window";
   const window2 = window1.clone();
   window2.position.x = 2.8;
+  window2.name = "window";
   group.add(body, roof, door, window1, window2);
   group.position.set(x, 0, z);
   group.rotation.y = z > 0 ? Math.PI : 0;
@@ -294,13 +416,17 @@ function makeHero() {
 
   const leftShoe = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.36, 0.95), mat(0xf0eee7));
   leftShoe.position.set(-0.34, 0.2, 0.13);
+  leftShoe.name = "leftShoe";
   const rightShoe = leftShoe.clone();
   rightShoe.position.x = 0.34;
+  rightShoe.name = "rightShoe";
 
   const polo = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.88, 1.75, 7), mat(0x315c45));
   polo.position.y = 2.68;
+  polo.name = "top";
   const jacket = new THREE.Mesh(new THREE.BoxGeometry(1.72, 1.62, 0.28), mat(0x425b61));
   jacket.position.set(0, 2.72, -0.5);
+  jacket.name = "outer";
 
   const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 1.65, 6), mat(0xe2b883));
   leftArm.position.set(-1.0, 2.7, 0);
@@ -318,15 +444,53 @@ function makeHero() {
   const hair = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x49362e));
   hair.position.y = 4.66;
   hair.scale.set(1.02, 0.48, 1.02);
+  hair.name = "hair";
+  const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.075, 6, 4), mat(0x26302d));
+  leftEye.position.set(-0.23, 4.48, 0.66);
+  const rightEye = leftEye.clone();
+  rightEye.position.x = 0.23;
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.36, 5), mat(0xd5a879));
   nose.position.set(0, 4.38, 0.69);
   nose.rotation.x = Math.PI / 2;
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.045, 0.04), mat(0x8f4d48));
+  mouth.position.set(0, 4.14, 0.67);
 
   const tablet = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.02, 0.12), mat(0x26302d));
   tablet.position.set(0.82, 2.1, -0.5);
   tablet.rotation.z = -0.18;
+  tablet.name = "tablet";
+  tablet.visible = false;
 
-  hero.add(leftLeg, rightLeg, leftShoe, rightShoe, polo, jacket, leftArm, rightArm, neck, head, hair, nose, tablet);
+  const cap = new THREE.Group();
+  cap.name = "hat";
+  const capTop = new THREE.Mesh(new THREE.SphereGeometry(0.73, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x315c45));
+  capTop.position.y = 4.79;
+  capTop.scale.y = 0.42;
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.08, 0.48), mat(0x315c45));
+  brim.position.set(0, 4.77, 0.48);
+  cap.add(capTop, brim);
+
+  const glasses = new THREE.Group();
+  glasses.name = "glasses";
+  for (const x of [-0.25, 0.25]) {
+    const lens = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, 0.21, 0.035),
+      new THREE.MeshStandardMaterial({ color: 0x26302d, transparent: true, opacity: 0.72, roughness: 0.18 }),
+    );
+    lens.position.set(x, 4.47, 0.69);
+    glasses.add(lens);
+  }
+  const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.035, 0.04), mat(0x26302d));
+  bridge.position.set(0, 4.47, 0.7);
+  glasses.add(bridge);
+  glasses.visible = false;
+
+  const badge = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.06), mat(0xcce86b));
+  badge.position.set(0.48, 2.92, 0.76);
+  badge.name = "badge";
+  badge.visible = false;
+
+  hero.add(leftLeg, rightLeg, leftShoe, rightShoe, polo, jacket, leftArm, rightArm, neck, head, hair, leftEye, rightEye, nose, mouth, tablet, cap, glasses, badge);
   hero.traverse((object) => {
     if (object instanceof THREE.Mesh) {
       object.castShadow = true;
@@ -336,16 +500,46 @@ function makeHero() {
   return hero;
 }
 
-function animateHero(hero: THREE.Group, moving: boolean, now: number, sprinting: boolean) {
-  const stride = moving ? Math.sin(now * (sprinting ? 0.018 : 0.012)) * (sprinting ? 0.72 : 0.46) : 0;
+function applyOutfit(hero: THREE.Group, outfit: Outfit) {
+  const setColor = (name: string, color: number) => {
+    const mesh = hero.getObjectByName(name);
+    if (mesh instanceof THREE.Mesh && mesh.material instanceof THREE.MeshStandardMaterial) mesh.material.color.setHex(color);
+  };
+  setColor("top", outfit.top);
+  setColor("outer", outfit.outer);
+  setColor("leftLeg", outfit.pants);
+  setColor("rightLeg", outfit.pants);
+  setColor("leftShoe", outfit.shoes);
+  setColor("rightShoe", outfit.shoes);
+  const hat = hero.getObjectByName("hat");
+  const glasses = hero.getObjectByName("glasses");
+  const badge = hero.getObjectByName("badge");
+  if (hat) hat.visible = Boolean(outfit.hat);
+  if (glasses) glasses.visible = Boolean(outfit.glasses);
+  if (badge) badge.visible = Boolean(outfit.badge);
+}
+
+function animateHero(hero: THREE.Group, state: MovementState, now: number, fatigued: boolean, tabletOpen = false) {
+  const moving = state !== "Покой";
+  const cadence = state === "Бег трусцой" ? 0.017 : state === "Быстрый шаг" ? 0.014 : 0.01;
+  const amplitude = state === "Бег трусцой" ? 0.68 : state === "Быстрый шаг" ? 0.52 : 0.4;
+  const stride = moving ? Math.sin(now * cadence) * amplitude : Math.sin(now * 0.0012) * 0.035;
   const leftLeg = hero.getObjectByName("leftLeg");
   const rightLeg = hero.getObjectByName("rightLeg");
   const leftArm = hero.getObjectByName("leftArm");
   const rightArm = hero.getObjectByName("rightArm");
+  const top = hero.getObjectByName("top");
+  const outer = hero.getObjectByName("outer");
+  const tablet = hero.getObjectByName("tablet");
   if (leftLeg) leftLeg.rotation.x = stride;
   if (rightLeg) rightLeg.rotation.x = -stride;
   if (leftArm) leftArm.rotation.x = -stride * 0.72;
   if (rightArm) rightArm.rotation.x = stride * 0.72;
+  const lean = fatigued ? 0.16 : state === "Бег трусцой" ? -0.1 : 0;
+  if (top) top.rotation.x = THREE.MathUtils.lerp(top.rotation.x, lean, 0.12);
+  if (outer) outer.rotation.x = THREE.MathUtils.lerp(outer.rotation.x, lean, 0.12);
+  if (tablet) tablet.visible = tabletOpen;
+  hero.rotation.z = moving ? Math.sin(now * cadence) * 0.018 : Math.sin(now * 0.001) * 0.012;
 }
 
 function actionForCode(code: string): InputAction | null {
@@ -380,12 +574,25 @@ function touchesBox(x: number, z: number, radius: number, collider: WorldCollide
 
 function makeCar() {
   const group = new THREE.Group();
+  group.name = "carRoot";
+  const visual = new THREE.Group();
+  visual.name = "carVisual";
   const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 6.2), mat(0xc85f4c));
   body.position.y = 1.05;
+  body.name = "carBody";
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.7, 1.15, 3.1), mat(0x9bc1c7));
   cabin.position.set(0, 1.95, -0.25);
   cabin.geometry.rotateX(-0.05);
-  group.add(body, cabin);
+  const frontLightMaterial = new THREE.MeshStandardMaterial({ color: 0xffe6ad, emissive: 0xffd37a, emissiveIntensity: 0.25 });
+  const rearLightMaterial = new THREE.MeshStandardMaterial({ color: 0xa7352b, emissive: 0x7a0d08, emissiveIntensity: 0.2 });
+  for (const x of [-1.03, 1.03]) {
+    const front = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.34, 0.12), frontLightMaterial);
+    front.position.set(x, 1.08, 3.15);
+    const rear = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.32, 0.12), rearLightMaterial);
+    rear.position.set(x, 1.04, -3.15);
+    visual.add(front, rear);
+  }
+  visual.add(body, cabin);
   for (const x of [-1.58, 1.58]) {
     for (const z of [-2.0, 2.0]) {
       const wheel = new THREE.Mesh(
@@ -394,9 +601,11 @@ function makeCar() {
       );
       wheel.rotation.z = Math.PI / 2;
       wheel.position.set(x, 0.64, z);
-      group.add(wheel);
+      wheel.name = z > 0 ? "frontWheel" : "rearWheel";
+      visual.add(wheel);
     }
   }
+  group.add(visual);
   group.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;
   });
@@ -414,6 +623,14 @@ export default function SecurityConsoleGame() {
     keys: Set<string>;
     driving: boolean;
     carSpeed: number;
+    carSteer: number;
+    carSlip: number;
+    fuel: number;
+    odometer: number;
+    wear: number;
+    surface: SurfaceKind;
+    lastForwardTap: number;
+    fastWalkUntil: number;
     residents: Resident[];
     colliders: WorldCollider[];
     walkers: Walker[];
@@ -427,6 +644,14 @@ export default function SecurityConsoleGame() {
     keys: new Set(),
     driving: false,
     carSpeed: 0,
+    carSteer: 0,
+    carSlip: 0,
+    fuel: 40,
+    odometer: 0,
+    wear: 0,
+    surface: "Асфальт",
+    lastForwardTap: 0,
+    fastWalkUntil: 0,
     residents: [],
     colliders: [],
     walkers: [],
@@ -438,26 +663,44 @@ export default function SecurityConsoleGame() {
     cameraInputAt: 0,
   });
 
+  const [initialSave] = useState<SaveData>(() => readSave());
+  const initialOutfit = initialSave.outfit && OUTFIT_BY_ID[initialSave.outfit] ? initialSave.outfit : "casual";
+  const initialOwned = Array.from(new Set<OutfitId>(["casual", ...(initialSave.ownedOutfits ?? [])])).filter((id) => Boolean(OUTFIT_BY_ID[id]));
+  const initialCarUpgrade = clamp(initialSave.carUpgrade ?? 0, 0, 3);
   const [mode, setMode] = useState<GameMode>("intro");
   const modeRef = useRef<GameMode>("intro");
   const [energy, setEnergy] = useState(100);
   const energyRef = useRef(100);
-  const [money, setMoney] = useState(5000);
-  const [reputation, setReputation] = useState(0);
+  const [money, setMoney] = useState(initialSave.money);
+  const [reputation, setReputation] = useState(initialSave.reputation);
   const [gameTime, setGameTime] = useState(8.25);
   const [driving, setDriving] = useState(false);
+  const [nearCar, setNearCar] = useState(false);
   const [nearest, setNearest] = useState<Resident | null>(null);
   const [activeNpcId, setActiveNpcId] = useState<number | null>(null);
-  const [residents, setResidents] = useState<Resident[]>([]);
-  const residentsRef = useRef<Resident[]>([]);
+  const [residents, setResidents] = useState<Resident[]>(() => residentsFromSave(initialSave));
+  const residentsRef = useRef<Resident[]>(residents);
   const [npcLine, setNpcLine] = useState("");
   const [toast, setToast] = useState("");
   const [showTariff, setShowTariff] = useState(false);
-  const [tabletTab, setTabletTab] = useState<"hero" | "clients" | "finance" | "map">("hero");
+  const [tabletTab, setTabletTab] = useState<"hero" | "wardrobe" | "clients" | "finance" | "map">("hero");
   const [playerPos, setPlayerPos] = useState({ x: -4, z: -2 });
   const [locationName, setLocationName] = useState<"Первореченское" | "станица Динская">("Первореченское");
   const [distanceToDinskaya, setDistanceToDinskaya] = useState(4);
-  const [weather, setWeather] = useState<"Ясно" | "Облачно" | "Дождь">("Ясно");
+  const [weather, setWeather] = useState<WeatherKind>("Ясно");
+  const weatherRef = useRef<WeatherKind>("Ясно");
+  const [movementState, setMovementState] = useState<MovementState>("Покой");
+  const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: 40, surface: "Асфальт" as SurfaceKind, wear: 0 });
+  const [outfitId, setOutfitId] = useState<OutfitId>(initialOutfit);
+  const outfitRef = useRef<OutfitId>(initialOutfit);
+  const [ownedOutfits, setOwnedOutfits] = useState<OutfitId[]>(initialOwned);
+  const ownedOutfitsRef = useRef<OutfitId[]>(initialOwned);
+  const [carUpgrade, setCarUpgrade] = useState(initialCarUpgrade);
+  const carUpgradeRef = useRef(initialCarUpgrade);
+  const [officeZone, setOfficeZone] = useState<OfficeZone>("console");
+  const [coffeeReady, setCoffeeReady] = useState(true);
+  const [equipment, setEquipment] = useState(6);
+  const [officeMessage, setOfficeMessage] = useState("Офис готов к работе. Выберите помещение слева.");
   const [alarm, setAlarm] = useState<null | { type: string; address: string; correct: string }>(null);
   const [alarmResult, setAlarmResult] = useState("Система в норме. Ожидаем сигнал.");
 
@@ -477,6 +720,9 @@ export default function SecurityConsoleGame() {
         reputation: nextRep,
         contracts: nextResidents.filter((r) => r.signed).map((r) => r.id),
         interests: Object.fromEntries(nextResidents.map((r) => [r.id, r.interest])),
+        outfit: outfitRef.current,
+        ownedOutfits: ownedOutfitsRef.current,
+        carUpgrade: carUpgradeRef.current,
       };
       localStorage.setItem("security-console-save-v1", JSON.stringify(save));
     },
@@ -492,17 +738,14 @@ export default function SecurityConsoleGame() {
   }, [energy]);
 
   useEffect(() => {
-    const save = readSave();
-    setMoney(save.money);
-    setReputation(save.reputation);
-    const initial = RESIDENT_SEED.map((r) => ({
-      ...r,
-      interest: save.interests[r.id] ?? 38 + ((r.id * 7) % 13),
-      signed: save.contracts.includes(r.id),
-    }));
-    residentsRef.current = initial;
-    setResidents(initial);
-  }, []);
+    weatherRef.current = weather;
+  }, [weather]);
+
+  useEffect(() => {
+    outfitRef.current = outfitId;
+    const hero = engineRef.current.player;
+    if (hero) applyOutfit(hero, OUTFIT_BY_ID[outfitId]);
+  }, [outfitId]);
 
   useEffect(() => {
     if (!mountRef.current || residentsRef.current.length === 0) return;
@@ -539,6 +782,55 @@ export default function SecurityConsoleGame() {
     sun.shadow.camera.top = 110;
     sun.shadow.camera.bottom = -110;
     scene.add(sun);
+
+    const starGeometry = new THREE.BufferGeometry();
+    const starPositions = new Float32Array(360 * 3);
+    for (let i = 0; i < 360; i++) {
+      starPositions[i * 3] = ((i * 97) % 800) - 400;
+      starPositions[i * 3 + 1] = 70 + ((i * 43) % 95);
+      starPositions[i * 3 + 2] = ((i * 61) % 700) - 350;
+    }
+    starGeometry.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
+    const stars = new THREE.Points(
+      starGeometry,
+      new THREE.PointsMaterial({ color: 0xeaf3ff, size: 0.72, transparent: true, opacity: 0.88 }),
+    );
+    stars.visible = false;
+    scene.add(stars);
+
+    const rainGeometry = new THREE.BufferGeometry();
+    const rainPositions = new Float32Array(720 * 3);
+    for (let i = 0; i < 720; i++) {
+      rainPositions[i * 3] = ((i * 47) % 130) - 65;
+      rainPositions[i * 3 + 1] = 3 + ((i * 31) % 48);
+      rainPositions[i * 3 + 2] = ((i * 73) % 130) - 65;
+    }
+    rainGeometry.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+    const rain = new THREE.Points(
+      rainGeometry,
+      new THREE.PointsMaterial({ color: 0xb8d9e4, size: 0.13, transparent: true, opacity: 0.62 }),
+    );
+    rain.visible = false;
+    scene.add(rain);
+
+    const dustPuffs: { mesh: THREE.Mesh; life: number }[] = [];
+    for (let i = 0; i < 18; i++) {
+      const dustMaterial = new THREE.MeshStandardMaterial({
+        color: 0xc4a878,
+        roughness: 1,
+        transparent: true,
+        opacity: 0,
+        flatShading: true,
+      });
+      const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 0), dustMaterial);
+      puff.visible = false;
+      scene.add(puff);
+      dustPuffs.push({ mesh: puff, life: 0 });
+    }
+    let dustIndex = 0;
+    let dustTimer = 0;
+    const windowMaterials: THREE.MeshStandardMaterial[] = [];
+    const lampMaterials: THREE.MeshStandardMaterial[] = [];
 
     engine.colliders = [];
     engine.walkers = [];
@@ -594,7 +886,12 @@ export default function SecurityConsoleGame() {
     const houses: [number, number][] = residentsRef.current.map((r) => [r.x, r.z]);
     houses.forEach(([x, z], i) => {
       const colors = [0xe1b47d, 0xd89073, 0xd6c98a, 0x8eaf9a, 0xc7a3a3];
-      makeHouse(scene, x, z, colors[i % colors.length], residentsRef.current[i].signed);
+      const house = makeHouse(scene, x, z, colors[i % colors.length], residentsRef.current[i].signed);
+      house.traverse((part) => {
+        if (part instanceof THREE.Mesh && part.name === "window" && part.material instanceof THREE.MeshStandardMaterial) {
+          windowMaterials.push(part.material);
+        }
+      });
       engine.colliders.push({ x, z, halfX: 5.4, halfZ: 4.9, kind: "house" });
       box(scene, [13, 0.42, 0.28], [x, 0.5, z + (z > 0 ? -6.4 : 6.4)], 0x806f55);
     });
@@ -612,7 +909,12 @@ export default function SecurityConsoleGame() {
         if (added >= count) break;
         const overlapsLead = houses.some(([hx, hz]) => Math.hypot(x - hx, z - hz) < 15);
         if (centreX === 0 && overlapsLead) continue;
-        makeHouse(scene, x, z, houseColors[(startIndex + added) % houseColors.length], false);
+        const house = makeHouse(scene, x, z, houseColors[(startIndex + added) % houseColors.length], false);
+        house.traverse((part) => {
+          if (part instanceof THREE.Mesh && part.name === "window" && part.material instanceof THREE.MeshStandardMaterial) {
+            windowMaterials.push(part.material);
+          }
+        });
         engine.colliders.push({ x, z, halfX: 5.4, halfZ: 4.9, kind: "house" });
         added += 1;
       }
@@ -644,7 +946,15 @@ export default function SecurityConsoleGame() {
       const lamp = new THREE.Group();
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 4.6, 6), mat(0x374943));
       pole.position.y = 2.3;
-      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.34, 7, 5), mat(0xffd88a));
+      const glowMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffd88a,
+        emissive: 0xffbf5a,
+        emissiveIntensity: 0.1,
+        roughness: 0.6,
+        flatShading: true,
+      });
+      lampMaterials.push(glowMaterial);
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.34, 7, 5), glowMaterial);
       glow.position.y = 4.7;
       lamp.add(pole, glow);
       lamp.position.set(x, 0, 7.6 - x * 0.035);
@@ -721,6 +1031,7 @@ export default function SecurityConsoleGame() {
 
     const player = makeHero();
     player.position.set(-4, 0, -3);
+    applyOutfit(player, OUTFIT_BY_ID[outfitRef.current]);
     scene.add(player);
     engine.player = player;
 
@@ -778,6 +1089,11 @@ export default function SecurityConsoleGame() {
       const action = actionForCode(e.code);
       if (action) engine.keys.add(action);
       if (e.code === "Tab" || e.code === "Space") e.preventDefault();
+      if (e.code === "KeyW" && !e.repeat) {
+        const tapNow = performance.now();
+        if (tapNow - engine.lastForwardTap < 320) engine.fastWalkUntil = tapNow + 1500;
+        engine.lastForwardTap = tapNow;
+      }
 
       if (e.code === "Tab" && modeRef.current === "world") {
         engine.keys.clear();
@@ -816,6 +1132,8 @@ export default function SecurityConsoleGame() {
           return;
         }
         if (engine.nearest && !engine.nearest.signed) {
+          energyRef.current = clamp(energyRef.current - 2, 0, 100);
+          setEnergy(Math.round(energyRef.current));
           setActiveNpcId(engine.nearest.id);
           setNpcLine(engine.nearest.greeting);
           setMode("dialogue");
@@ -911,24 +1229,78 @@ export default function SecurityConsoleGame() {
       last = now;
       const canMove = modeRef.current === "world";
       const focus = engine.driving ? car : player;
+      let currentMovement: MovementState = "Покой";
 
       if (canMove && engine.driving) {
         const throttle = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
-        const steer = (engine.keys.has("left") ? 1 : 0) - (engine.keys.has("right") ? 1 : 0);
-        engine.carSpeed += throttle * 18 * dt;
-        engine.carSpeed *= engine.keys.has("brake") ? Math.pow(0.25, dt * 6) : Math.pow(0.55, dt);
-        engine.carSpeed = clamp(engine.carSpeed, -9, 26);
+        const steerInput = (engine.keys.has("left") ? 1 : 0) - (engine.keys.has("right") ? 1 : 0);
+        const handbrake = engine.keys.has("brake");
+        const surface = surfaceAt(car.position.x, car.position.z);
+        engine.surface = surface;
+        const gripBase = surface === "Асфальт" ? 1 : surface === "Грунт" ? 0.64 : 0.4;
+        const wetGrip = weatherRef.current === "Дождь" || weatherRef.current === "Гроза" ? 0.78 : 1;
+        const grip = gripBase * wetGrip * (handbrake ? 0.24 : 1);
+        const maxSpeed = 30.6 * (1 + carUpgradeRef.current * 0.15);
+        const acceleration = 6.2 * (1 + carUpgradeRef.current * 0.12) * (surface === "Трава" ? 0.72 : 1);
+        if (throttle !== 0 && engine.fuel > 0) {
+          const directionPenalty = Math.sign(throttle) !== Math.sign(engine.carSpeed) && Math.abs(engine.carSpeed) > 1 ? 1.65 : 1;
+          engine.carSpeed += throttle * acceleration * directionPenalty * dt;
+        } else {
+          const rolling = surface === "Асфальт" ? 0.72 : surface === "Грунт" ? 1.25 : 2.15;
+          const slow = rolling * dt + Math.abs(engine.carSpeed) * 0.018 * dt;
+          engine.carSpeed = Math.abs(engine.carSpeed) <= slow ? 0 : engine.carSpeed - Math.sign(engine.carSpeed) * slow;
+        }
+        if (handbrake) engine.carSpeed *= Math.pow(0.47, dt);
+        engine.carSpeed = clamp(engine.carSpeed, -9.2, maxSpeed);
+        engine.carSteer = THREE.MathUtils.lerp(engine.carSteer, steerInput, 1 - Math.pow(0.0025, dt));
         if (Math.abs(engine.carSpeed) > 0.35) {
-          car.rotation.y += steer * dt * 1.45 * Math.sign(engine.carSpeed) * clamp(Math.abs(engine.carSpeed) / 8, 0.4, 1);
+          const steerAuthority = 0.34 + clamp(Math.abs(engine.carSpeed) / 14, 0, 1) * 0.82;
+          car.rotation.y += engine.carSteer * dt * steerAuthority * Math.sign(engine.carSpeed) * (0.7 + grip * 0.3);
         }
         const carDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(car.quaternion);
-        const candidateX = car.position.x + carDirection.x * engine.carSpeed * dt;
-        const candidateZ = car.position.z + carDirection.z * engine.carSpeed * dt;
+        const carSide = new THREE.Vector3(carDirection.z, 0, -carDirection.x);
+        const slipTarget =
+          engine.carSteer *
+          Math.abs(engine.carSpeed) *
+          (1 - grip) *
+          (handbrake ? 0.42 : 0.12) *
+          Math.sign(engine.carSpeed || 1);
+        engine.carSlip = THREE.MathUtils.lerp(engine.carSlip, slipTarget, 1 - Math.pow(grip > 0.72 ? 0.0004 : 0.045, dt));
+        const candidateX = car.position.x + (carDirection.x * engine.carSpeed + carSide.x * engine.carSlip) * dt;
+        const candidateZ = car.position.z + (carDirection.z * engine.carSpeed + carSide.z * engine.carSlip) * dt;
         if (!isBlocked(candidateX, candidateZ, 2.25, false)) {
           car.position.x = clamp(candidateX, -180, 4180);
           car.position.z = clamp(candidateZ, -195, 195);
+          const travelled = Math.abs(engine.carSpeed) * dt;
+          engine.odometer += travelled / 1000;
+          engine.fuel = Math.max(0, engine.fuel - travelled * 0.00006 * (1 + Math.abs(throttle) * 0.18));
         } else {
-          engine.carSpeed *= -0.16;
+          const impact = Math.abs(engine.carSpeed);
+          engine.carSpeed *= -0.12;
+          engine.carSlip *= -0.2;
+          engine.wear = clamp(engine.wear + impact * 0.025, 0, 100);
+        }
+        const carVisual = car.getObjectByName("carVisual");
+        if (carVisual) {
+          carVisual.rotation.z = THREE.MathUtils.lerp(carVisual.rotation.z, -engine.carSteer * clamp(Math.abs(engine.carSpeed) / 25, 0, 1) * 0.13, 1 - Math.pow(0.01, dt));
+          carVisual.rotation.x = THREE.MathUtils.lerp(carVisual.rotation.x, -throttle * 0.035 + Math.sin(now * 0.016) * (surface === "Асфальт" ? 0.002 : 0.012), 1 - Math.pow(0.025, dt));
+          carVisual.position.y = Math.sin(now * 0.013) * (surface === "Асфальт" ? 0.008 : 0.055);
+        }
+        car.traverse((part) => {
+          if (part instanceof THREE.Mesh && (part.name === "frontWheel" || part.name === "rearWheel")) {
+            part.rotation.x += engine.carSpeed * dt / 0.58;
+          }
+        });
+        dustTimer -= dt;
+        if (surface !== "Асфальт" && Math.abs(engine.carSpeed) > 5 && dustTimer <= 0) {
+          const puff = dustPuffs[dustIndex];
+          dustIndex = (dustIndex + 1) % dustPuffs.length;
+          dustTimer = 0.075;
+          puff.life = 1;
+          puff.mesh.visible = true;
+          puff.mesh.position.copy(car.position).add(carDirection.clone().multiplyScalar(-2.5));
+          puff.mesh.position.y = 0.45;
+          puff.mesh.scale.setScalar(0.7);
         }
         if (!mouseDown && now - engine.cameraInputAt > 1500) {
           engine.yaw = THREE.MathUtils.lerp(engine.yaw, car.rotation.y + Math.PI, 1 - Math.pow(0.06, dt));
@@ -937,8 +1309,15 @@ export default function SecurityConsoleGame() {
         const forward = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
         const side = (engine.keys.has("right") ? 1 : 0) - (engine.keys.has("left") ? 1 : 0);
         const moving = Math.abs(forward) + Math.abs(side) > 0;
-        const sprinting = moving && engine.keys.has("sprint") && energyRef.current > 0.5;
-        const speed = sprinting ? 5.8 : energyRef.current <= 0 ? 1.55 : 2.7;
+        const jogging = moving && engine.keys.has("sprint") && energyRef.current > 10;
+        const fastWalking = moving && !jogging && now < engine.fastWalkUntil;
+        currentMovement = jogging ? "Бег трусцой" : fastWalking ? "Быстрый шаг" : moving ? "Шаг" : "Покой";
+        const outfit = OUTFIT_BY_ID[outfitRef.current];
+        const surface = surfaceAt(player.position.x, player.position.z);
+        const surfaceSpeed = surface === "Асфальт" ? 1 : surface === "Грунт" ? 0.95 * outfit.ground : 0.85 * outfit.ground;
+        const fatigueSpeed = energyRef.current < 20 ? 0.7 : 1;
+        const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.8;
+        const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed;
         if (moving) {
           const angle = engine.yaw;
           const length = Math.max(1, Math.hypot(forward, side));
@@ -949,19 +1328,25 @@ export default function SecurityConsoleGame() {
           if (!isBlocked(nextX, player.position.z, 0.62, true)) player.position.x = nextX;
           if (!isBlocked(player.position.x, nextZ, 0.62, true)) player.position.z = nextZ;
           player.rotation.y = Math.atan2(dx, dz);
-          player.position.y = Math.abs(Math.sin(now * 0.012)) * 0.08;
-          if (sprinting) {
-            const nextEnergy = clamp(energyRef.current - dt * 2.9, 0, 100);
-            energyRef.current = nextEnergy;
-          } else {
-            energyRef.current = clamp(energyRef.current + dt * 0.22, 0, 100);
-          }
-          animateHero(player, true, now, sprinting);
+          player.position.y = Math.abs(Math.sin(now * (jogging ? 0.017 : 0.011))) * (jogging ? 0.1 : 0.055);
+          const energyCost = (jogging ? 1.5 : fastWalking ? 0.5 : 0.2) * outfit.energy;
+          energyRef.current = clamp(energyRef.current - dt * energyCost, 0, 100);
         } else {
           player.position.y = THREE.MathUtils.lerp(player.position.y, 0, dt * 10);
-          energyRef.current = clamp(energyRef.current + dt * 0.45, 0, 100);
-          animateHero(player, false, now, false);
+          energyRef.current = clamp(energyRef.current + dt * 5, 0, 100);
         }
+      }
+      if (!engine.driving) {
+        animateHero(player, currentMovement, now, energyRef.current < 20, modeRef.current === "tablet");
+      }
+
+      for (const puff of dustPuffs) {
+        if (puff.life <= 0) continue;
+        puff.life = Math.max(0, puff.life - dt * 0.85);
+        puff.mesh.position.y += dt * 0.35;
+        puff.mesh.scale.multiplyScalar(1 + dt * 1.15);
+        if (puff.mesh.material instanceof THREE.MeshStandardMaterial) puff.mesh.material.opacity = puff.life * 0.42;
+        if (puff.life <= 0) puff.mesh.visible = false;
       }
 
       // 06:00–21:00 lasts two real hours; the nine-hour night lasts 15 minutes.
@@ -969,13 +1354,48 @@ export default function SecurityConsoleGame() {
       engine.time += dt * (isDay ? 15 / 7200 : 9 / 900);
       if (engine.time >= 24) engine.time -= 24;
       const dayFactor = clamp(Math.sin(((engine.time - 5.5) / 24) * Math.PI * 2) * 0.65 + 0.45, 0.08, 1);
-      sun.intensity = 0.35 + dayFactor * 2.7;
-      hemi.intensity = 0.35 + dayFactor * 1.8;
-      const dayColor = new THREE.Color(0x91bfc1);
+      const wetWeather = weatherRef.current === "Дождь" || weatherRef.current === "Гроза";
+      const cloudFactor = weatherRef.current === "Облачно" ? 0.78 : wetWeather ? 0.58 : 1;
+      const stormFlash = weatherRef.current === "Гроза" && Math.sin(now * 0.0017) > 0.994;
+      sun.intensity = (0.35 + dayFactor * 2.7) * cloudFactor + (stormFlash ? 4.5 : 0);
+      hemi.intensity = (0.35 + dayFactor * 1.8) * cloudFactor + (stormFlash ? 1.8 : 0);
+      const dayColor = new THREE.Color(weatherRef.current === "Ясно" ? 0x91bfc1 : weatherRef.current === "Облачно" ? 0xa8b8b7 : 0x657f87);
+      const sunsetColor = new THREE.Color(0xd88778);
       const nightColor = new THREE.Color(0x182940);
-      const sky = nightColor.clone().lerp(dayColor, dayFactor);
+      let sky = nightColor.clone().lerp(dayColor, dayFactor);
+      const sunsetStrength = clamp(1 - Math.abs(engine.time - 19.1) / 2.1, 0, 1);
+      const dawnStrength = clamp(1 - Math.abs(engine.time - 6.4) / 1.5, 0, 1);
+      sky = sky.lerp(sunsetColor, Math.max(sunsetStrength, dawnStrength) * 0.5);
+      if (stormFlash) sky.lerp(new THREE.Color(0xe7eff6), 0.72);
       scene.background = sky;
-      if (scene.fog) scene.fog.color.copy(sky);
+      if (scene.fog instanceof THREE.Fog) {
+        scene.fog.color.copy(sky);
+        scene.fog.near = weatherRef.current === "Гроза" ? 85 : wetWeather ? 115 : weatherRef.current === "Облачно" ? 145 : 170;
+        scene.fog.far = weatherRef.current === "Гроза" ? 420 : wetWeather ? 560 : weatherRef.current === "Облачно" ? 720 : 900;
+      }
+      renderer.toneMappingExposure = 0.74 + dayFactor * 0.31 + (stormFlash ? 0.5 : 0);
+      sun.color.setHex(sunsetStrength > 0.25 ? 0xffb071 : dayFactor < 0.25 ? 0xd0e0f0 : 0xfff0d4);
+      stars.visible = dayFactor < 0.24 && !wetWeather;
+      stars.position.set(focus.position.x, 0, focus.position.z);
+      rain.visible = wetWeather;
+      rain.position.set(focus.position.x, 0, focus.position.z);
+      if (rain.visible) {
+        const positions = rain.geometry.getAttribute("position") as THREE.BufferAttribute;
+        for (let i = 0; i < positions.count; i++) {
+          let y = positions.getY(i) - dt * (weatherRef.current === "Гроза" ? 52 : 38);
+          if (y < 0.4) y = 45 + ((i * 17) % 9);
+          positions.setY(i, y);
+        }
+        positions.needsUpdate = true;
+      }
+      const nightGlow = clamp(1 - dayFactor * 1.5, 0, 1);
+      windowMaterials.forEach((material) => {
+        material.emissive.setHex(0xffa857);
+        material.emissiveIntensity = nightGlow * 1.25;
+      });
+      lampMaterials.forEach((material) => {
+        material.emissiveIntensity = 0.1 + nightGlow * 2.2;
+      });
 
       engine.residents.forEach((resident, i) => {
         if (!resident.mesh) return;
@@ -1029,7 +1449,15 @@ export default function SecurityConsoleGame() {
         setEnergy(Math.round(energyRef.current));
         setGameTime(engine.time);
         setNearest(engine.nearest);
+        setNearCar(!engine.driving && player.position.distanceTo(car.position) < 5.2);
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
+        setMovementState(currentMovement);
+        setCarTelemetry({
+          speed: Math.round(Math.abs(engine.carSpeed) * 3.6),
+          fuel: Math.round(engine.fuel * 10) / 10,
+          surface: engine.surface,
+          wear: Math.round(engine.wear),
+        });
         const inDinskaya = focus.position.x > 2000;
         setLocationName(inDinskaya ? "станица Динская" : "Первореченское");
         setDistanceToDinskaya(Math.max(0, Math.round(Math.abs(4000 - focus.position.x) / 100) / 10));
@@ -1059,7 +1487,8 @@ export default function SecurityConsoleGame() {
     if (!activeNpc) return;
     const current = residentsRef.current.find((r) => r.id === activeNpc.id);
     if (!current) return;
-    let change = kind === current.hook ? 27 : kind === "pressure" ? -11 : 9;
+    const outfitTrust = Math.min(4, Math.round(OUTFIT_BY_ID[outfitRef.current].trust * 0.4));
+    let change = (kind === current.hook ? 27 : kind === "pressure" ? -11 : 9) + outfitTrust;
     if (current.archetype === "Вредный" && kind === "pressure") change = 26;
     current.interest = clamp(current.interest + change, 0, 100);
     setResidents([...residentsRef.current]);
@@ -1074,6 +1503,107 @@ export default function SecurityConsoleGame() {
       flash(`+${change}% интереса`);
     }
     persist(residentsRef.current);
+  };
+
+  const handleOutfit = (outfit: Outfit) => {
+    const isOwned = ownedOutfitsRef.current.includes(outfit.id);
+    if (!isOwned) {
+      if (money < outfit.price) {
+        flash(`Для комплекта «${outfit.name}» не хватает ${(outfit.price - money).toLocaleString("ru-RU")} ₽`);
+        return;
+      }
+      const nextMoney = money - outfit.price;
+      const nextOwned = [...ownedOutfitsRef.current, outfit.id];
+      ownedOutfitsRef.current = nextOwned;
+      outfitRef.current = outfit.id;
+      setOwnedOutfits(nextOwned);
+      setOutfitId(outfit.id);
+      setMoney(nextMoney);
+      persist(residentsRef.current, nextMoney, reputation);
+      flash(`Комплект «${outfit.name}» куплен и надет`);
+      return;
+    }
+    outfitRef.current = outfit.id;
+    setOutfitId(outfit.id);
+    persist();
+    flash(`Алексей переоделся: ${outfit.name}`);
+  };
+
+  const cycleWeather = () => {
+    const order: WeatherKind[] = ["Ясно", "Облачно", "Дождь", "Гроза"];
+    const next = order[(order.indexOf(weatherRef.current) + 1) % order.length];
+    weatherRef.current = next;
+    setWeather(next);
+    flash(`Погода: ${next}`);
+  };
+
+  const handleOfficeAction = (action: "coffee" | "sleep" | "brochures" | "study" | "restock" | "upgrade") => {
+    if (action === "coffee") {
+      if (!coffeeReady) {
+        setOfficeMessage("Кофемашина нагревается. Следующая чашка будет доступна позже.");
+        return;
+      }
+      energyRef.current = clamp(energyRef.current + 15, 0, 100);
+      setEnergy(Math.round(energyRef.current));
+      setCoffeeReady(false);
+      setOfficeMessage("Тёплый кофе восстановил 15 единиц энергии.");
+      window.setTimeout(() => setCoffeeReady(true), 60000);
+      return;
+    }
+    if (action === "sleep") {
+      energyRef.current = 100;
+      setEnergy(100);
+      engineRef.current.time = (engineRef.current.time + 3) % 24;
+      setOfficeMessage("Алексей отдохнул на диване три игровых часа. Энергия восстановлена.");
+      return;
+    }
+    if (action === "brochures") {
+      const nextRep = clamp(reputation + 1, 0, 100);
+      setReputation(nextRep);
+      persist(residentsRef.current, money, nextRep);
+      setOfficeMessage("Подготовлена пачка буклетов. Репутация выросла на 1.");
+      return;
+    }
+    if (action === "study") {
+      if (money < 600) {
+        setOfficeMessage("На обучающий курс сейчас не хватает 600 ₽.");
+        return;
+      }
+      const nextMoney = money - 600;
+      const nextRep = clamp(reputation + 2, 0, 100);
+      setMoney(nextMoney);
+      setReputation(nextRep);
+      persist(residentsRef.current, nextMoney, nextRep);
+      setOfficeMessage("Пройден короткий курс переговоров: −600 ₽, репутация +2.");
+      return;
+    }
+    if (action === "restock") {
+      if (money < 1500) {
+        setOfficeMessage("Для пополнения склада нужно 1 500 ₽.");
+        return;
+      }
+      const nextMoney = money - 1500;
+      setMoney(nextMoney);
+      setEquipment((value) => value + 10);
+      persist(residentsRef.current, nextMoney, reputation);
+      setOfficeMessage("На склад доставлены 10 комплектов датчиков.");
+      return;
+    }
+    if (carUpgradeRef.current >= 3) {
+      setOfficeMessage("Двигатель уже настроен до Stage 3.");
+      return;
+    }
+    const price = 7000 + carUpgradeRef.current * 4500;
+    if (money < price) {
+      setOfficeMessage(`Для Stage ${carUpgradeRef.current + 1} нужно ${price.toLocaleString("ru-RU")} ₽.`);
+      return;
+    }
+    const nextMoney = money - price;
+    carUpgradeRef.current += 1;
+    setCarUpgrade(carUpgradeRef.current);
+    setMoney(nextMoney);
+    persist(residentsRef.current, nextMoney, reputation);
+    setOfficeMessage(`Двигатель улучшен до Stage ${carUpgradeRef.current}. Максимальная скорость и разгон выросли.`);
   };
 
   const signContract = (tariffIndex: number) => {
@@ -1107,6 +1637,7 @@ export default function SecurityConsoleGame() {
       flash(`До открытия пульта нужно ещё ${10 - signedCount} договоров`);
       return;
     }
+    setOfficeZone("console");
     setMode("office");
     setAlarmResult(demo ? "Учебная смена запущена. Сигнал поступит через секунду." : "Смена началась. Все объекты на связи.");
     setAlarm(null);
@@ -1154,8 +1685,23 @@ export default function SecurityConsoleGame() {
         : Math.round(playerPos.x / 300) * 300;
 
   return (
-    <main className="game-shell" aria-label="Игра Пульт охраны">
+    <main
+      className={`game-shell ${
+        weather === "Гроза"
+          ? "weather-storm"
+          : weather === "Дождь"
+            ? "weather-rain"
+            : weather === "Облачно"
+              ? "weather-cloudy"
+              : "weather-clear"
+      }`}
+      aria-label="Игра Пульт охраны"
+    >
       <div className="world-viewport" ref={mountRef} aria-label="Трёхмерный посёлок" />
+      {(weather === "Дождь" || weather === "Гроза") && (
+        <div className={`weather-screen ${weather === "Гроза" ? "storm" : "rain"}`} aria-hidden="true" />
+      )}
+      {energy < 20 && mode === "world" && <div className="fatigue-vignette" aria-hidden="true" />}
 
       {mode !== "intro" && mode !== "office" && (
         <div className="hud" aria-hidden={mode !== "world"}>
@@ -1177,7 +1723,18 @@ export default function SecurityConsoleGame() {
           <div className="energy-card">
             <div className="energy-label"><span>Энергия менеджера</span><b>{energy}%</b></div>
             <div className="energy-track"><div className="energy-fill" style={{ width: `${energy}%` }} /></div>
+            <small>{driving ? "За рулём" : movementState}{energy < 20 ? " · усталость" : ""}</small>
           </div>
+          {driving && (
+            <div className="vehicle-card">
+              <div className="vehicle-speed"><b>{carTelemetry.speed}</b><span>км/ч</span></div>
+              <div className="vehicle-data">
+                <span>{carTelemetry.surface} · двигатель {carUpgrade + 1}/4</span>
+                <span>Топливо {Math.round(carTelemetry.fuel)}% · износ {Math.round(carTelemetry.wear)}%</span>
+                <div className="vehicle-gauge"><i style={{ width: `${carTelemetry.fuel}%` }} /></div>
+              </div>
+            </div>
+          )}
           <div className="controls-hint">
             {driving ? (
               <><kbd>WASD</kbd> вести <kbd>Space</kbd> ручник <kbd>ПКМ</kbd> осмотреться <kbd>E</kbd> выйти</>
@@ -1212,14 +1769,13 @@ export default function SecurityConsoleGame() {
             ))}
             <span className="map-player" style={{ left: mapPos(playerPos.x - mapCenterX, 180), top: mapPos(-playerPos.z, 190) }} />
           </div>
-          {mode === "world" && (nearest || (driving && Math.abs(engineRef.current.carSpeed) < 1.2)) && (
+          {mode === "world" && (nearest || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>{driving ? "Выйти из машины" : `Поговорить · ${nearest?.name}`}</span>
             </div>
           )}
-          {mode === "world" && !driving && engineRef.current.car && engineRef.current.player &&
-            engineRef.current.player.position.distanceTo(engineRef.current.car.position) < 5.2 && !nearest && (
+          {mode === "world" && !driving && nearCar && !nearest && (
             <div className="interaction-prompt"><span className="key">E</span><span>Сесть в старый седан</span></div>
           )}
         </div>
@@ -1302,6 +1858,7 @@ export default function SecurityConsoleGame() {
             <aside className="tablet-sidebar">
               <h2>Мой пульт</h2>
               <button className={`tablet-tab ${tabletTab === "hero" ? "active" : ""}`} onClick={() => setTabletTab("hero")}>Алексей и навыки</button>
+              <button className={`tablet-tab ${tabletTab === "wardrobe" ? "active" : ""}`} onClick={() => setTabletTab("wardrobe")}>Гардероб</button>
               <button className={`tablet-tab ${tabletTab === "clients" ? "active" : ""}`} onClick={() => setTabletTab("clients")}>Жители и договоры</button>
               <button className={`tablet-tab ${tabletTab === "finance" ? "active" : ""}`} onClick={() => setTabletTab("finance")}>Финансы</button>
               <button className={`tablet-tab ${tabletTab === "map" ? "active" : ""}`} onClick={() => setTabletTab("map")}>Карта и смена</button>
@@ -1326,6 +1883,49 @@ export default function SecurityConsoleGame() {
                 </div>
                 <p className="hero-story">Алексей вырос в ПервоРеченском, затем работал менеджером в городском ЧОПе. Услышав о кражах в родном посёлке, он вернулся со старой машиной, небольшим капиталом и намерением снова заслужить доверие соседей.</p>
               </>}
+              {tabletTab === "wardrobe" && <>
+                <div className="wardrobe-head">
+                  <div>
+                    <small>Кастомизация героя</small>
+                    <h1>Гардероб Алексея</h1>
+                    <p>Одежда меняет внешний вид и даёт небольшие ситуационные бонусы. Купленные комплекты сохраняются.</p>
+                  </div>
+                  <span className="outfit-current">Сейчас: {OUTFIT_BY_ID[outfitId].name}</span>
+                </div>
+                <div className="wardrobe-grid">
+                  {OUTFITS.map((outfit) => {
+                    const owned = ownedOutfits.includes(outfit.id);
+                    const active = outfitId === outfit.id;
+                    return (
+                      <article key={outfit.id} className={`outfit-card ${active ? "active" : ""}`}>
+                        <div className="outfit-preview" style={{ background: outfit.preview }}>
+                          <span style={{ background: outfit.outer }} />
+                          <i style={{ background: outfit.top }} />
+                          <b style={{ background: outfit.pants }} />
+                        </div>
+                        <div className="outfit-copy">
+                          <small>{outfit.subtitle}</small>
+                          <h3>{outfit.name}</h3>
+                          <p>{outfit.description}</p>
+                          <div className="outfit-mods">
+                            {outfit.trust !== 0 && <span>Доверие {outfit.trust > 0 ? "+" : ""}{outfit.trust}%</span>}
+                            {outfit.speed !== 1 && <span>Скорость {outfit.speed > 1 ? "+" : ""}{Math.round((outfit.speed - 1) * 100)}%</span>}
+                            {outfit.energy !== 1 && <span>Расход энергии {outfit.energy < 1 ? "−" : "+"}{Math.abs(Math.round((outfit.energy - 1) * 100))}%</span>}
+                            {outfit.ground !== 1 && <span>Грунт +{Math.round((outfit.ground - 1) * 100)}%</span>}
+                          </div>
+                          <button
+                            className={active ? "outfit-button active" : "outfit-button"}
+                            onClick={() => handleOutfit(outfit)}
+                            disabled={active}
+                          >
+                            {active ? "Надето" : owned ? "Надеть" : `Купить · ${outfit.price.toLocaleString("ru-RU")} ₽`}
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </>}
               {tabletTab === "clients" && <>
                 <h1>Жители посёлка</h1>
                 <p>{signedCount} из 10 объектов подключено к будущему пульту.</p>
@@ -1348,7 +1948,7 @@ export default function SecurityConsoleGame() {
                   <div className="finance-box"><span>Репутация</span><b>{reputation} ★</b></div>
                 </div>
                 <div className="finance-row">
-                  <button className="primary-btn" onClick={() => setWeather(weather === "Ясно" ? "Облачно" : weather === "Облачно" ? "Дождь" : "Ясно")}>Сменить погоду: {weather}</button>
+                  <button className="primary-btn" onClick={cycleWeather}>Сменить погоду: {weather}</button>
                   <button className="soft-btn" style={{ color: "#315c45", borderColor: "#bfc8b8" }} onClick={resetSave}>Начать заново</button>
                 </div>
               </>}
@@ -1416,20 +2016,22 @@ export default function SecurityConsoleGame() {
       )}
 
       {mode === "office" && (
-        <section className="overlay office">
+        <section className={`overlay office office-${officeZone}`}>
           <aside className="office-side">
-            <small>Оперативный дежурный</small>
-            <h2>Пульт 01</h2>
-            <p>ПервоРеченское<br />Смена 20:00–08:00</p>
+            <small>Охранное предприятие</small>
+            <h2>«Пульт 01»</h2>
+            <p>ПервоРеченское<br />Офис и гараж</p>
             <div className="office-nav">
-              <div className="active">● Объекты</div>
-              <div>История событий</div>
-              <div>Экипажи ГБР</div>
-              <div>Оборудование</div>
+              <button className={officeZone === "console" ? "active" : ""} onClick={() => setOfficeZone("console")}>● Пультовая</button>
+              <button className={officeZone === "manager" ? "active" : ""} onClick={() => setOfficeZone("manager")}>Кабинет менеджера</button>
+              <button className={officeZone === "rest" ? "active" : ""} onClick={() => setOfficeZone("rest")}>Комната отдыха</button>
+              <button className={officeZone === "storage" ? "active" : ""} onClick={() => setOfficeZone("storage")}>Склад оборудования</button>
+              <button className={officeZone === "garage" ? "active" : ""} onClick={() => setOfficeZone("garage")}>Гараж</button>
             </div>
-            <button className="office-exit" onClick={() => setMode("world")}>E · Встать из-за пульта</button>
+            <button className="office-exit" onClick={() => setMode("world")}>E · Выйти из офиса</button>
           </aside>
           <div className="office-main">
+            {officeZone === "console" && <>
             <div className="office-header">
               <div><small>Центр наблюдения</small><h1>Состояние объектов</h1></div>
               <span className="live-pill">● Система онлайн</span>
@@ -1464,6 +2066,87 @@ export default function SecurityConsoleGame() {
                 <button className="alarm-action" onClick={() => handleAlarm("fire")}>Вызвать пожарных</button>
               </div>}
             </div>
+            </>}
+            {officeZone === "manager" && (
+              <div className="office-room">
+                <div className="office-header">
+                  <div><small>Рабочая зона</small><h1>Кабинет менеджера</h1></div>
+                  <span className="live-pill calm">Дела фирмы</span>
+                </div>
+                <p className="office-room-message">{officeMessage}</p>
+                <div className="office-zone-grid">
+                  <button className="office-zone-card desk" onClick={() => handleOfficeAction("brochures")}>
+                    <span>▤</span><b>Подготовить буклеты</b><small>Собрать материалы для встреч · репутация +1</small>
+                  </button>
+                  <button className="office-zone-card books" onClick={() => handleOfficeAction("study")}>
+                    <span>▥</span><b>Курс переговоров</b><small>Учебник и видеокурс · 600 ₽ · репутация +2</small>
+                  </button>
+                  <div className="office-zone-card passive">
+                    <span>◷</span><b>План на смену</b><small>{signedCount}/10 объектов · доход {monthlyIncome.toLocaleString("ru-RU")} ₽/мес.</small>
+                  </div>
+                </div>
+              </div>
+            )}
+            {officeZone === "rest" && (
+              <div className="office-room">
+                <div className="office-header">
+                  <div><small>Уютный уголок</small><h1>Комната отдыха</h1></div>
+                  <span className="live-pill calm">Тихо</span>
+                </div>
+                <p className="office-room-message">{officeMessage}</p>
+                <div className="office-zone-grid">
+                  <button className="office-zone-card coffee" onClick={() => handleOfficeAction("coffee")} disabled={!coffeeReady}>
+                    <span>☕</span><b>{coffeeReady ? "Сварить кофе" : "Кофе готовится"}</b><small>Энергия +15 · кофемашине нужна минута</small>
+                  </button>
+                  <button className="office-zone-card sofa" onClick={() => handleOfficeAction("sleep")}>
+                    <span>▰</span><b>Отдохнуть на диване</b><small>Полностью восстановить энергию · время +3 часа</small>
+                  </button>
+                  <div className="office-zone-card passive radio">
+                    <span>◉</span><b>Радио посёлка</b><small>Спокойная музыка и сводка погоды: {weather.toLowerCase()}</small>
+                  </div>
+                </div>
+              </div>
+            )}
+            {officeZone === "storage" && (
+              <div className="office-room">
+                <div className="office-header">
+                  <div><small>Учёт комплектов</small><h1>Склад оборудования</h1></div>
+                  <span className="live-pill calm">{equipment} комплектов</span>
+                </div>
+                <p className="office-room-message">{officeMessage}</p>
+                <div className="office-zone-grid">
+                  <button className="office-zone-card storage" onClick={() => handleOfficeAction("restock")}>
+                    <span>▦</span><b>Закупить 10 комплектов</b><small>Датчики, сирены и контрольные блоки · 1 500 ₽</small>
+                  </button>
+                  <div className="office-zone-card passive">
+                    <span>⌁</span><b>На складе</b><small>{equipment} монтажных комплектов · хватит на {equipment} новых объектов</small>
+                  </div>
+                  <div className="office-zone-card passive">
+                    <span>⊙</span><b>Резерв питания</b><small>Генератор исправен · связь стабильна</small>
+                  </div>
+                </div>
+              </div>
+            )}
+            {officeZone === "garage" && (
+              <div className="office-room">
+                <div className="office-header">
+                  <div><small>Мастерская</small><h1>Гараж и старая «девятка»</h1></div>
+                  <span className="live-pill calm">Двигатель {carUpgrade + 1}/4</span>
+                </div>
+                <p className="office-room-message">{officeMessage}</p>
+                <div className="garage-stage">
+                  <div className="garage-car"><i /><span /><b /></div>
+                  <div>
+                    <small>Состояние автомобиля</small>
+                    <h3>Топливо {Math.round(carTelemetry.fuel)}% · износ {Math.round(carTelemetry.wear)}%</h3>
+                    <p>Улучшение повышает тягу и максимальную скорость. На грунте машина всё равно требует аккуратной работы рулём.</p>
+                    <button className="garage-upgrade" onClick={() => handleOfficeAction("upgrade")} disabled={carUpgrade >= 3}>
+                      {carUpgrade >= 3 ? "Максимальная комплектация" : `Установить улучшение · ${(7000 + carUpgrade * 4500).toLocaleString("ru-RU")} ₽`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       )}

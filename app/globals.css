@@ -45,6 +45,49 @@ button {
   overflow: hidden;
 }
 
+.weather-screen,
+.fatigue-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.weather-screen {
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(102deg, transparent 0 13px, rgba(218, 239, 238, 0.2) 14px 15px, transparent 16px 31px);
+  opacity: 0.42;
+  animation: rain-screen 0.38s linear infinite;
+}
+
+.weather-screen.storm {
+  background:
+    radial-gradient(circle at 76% 12%, rgba(255, 255, 255, 0.36), transparent 11%),
+    repeating-linear-gradient(102deg, transparent 0 10px, rgba(220, 236, 242, 0.24) 11px 13px, transparent 14px 28px);
+  mix-blend-mode: screen;
+  animation: rain-screen 0.27s linear infinite, lightning-screen 7s steps(1) infinite;
+}
+
+.fatigue-vignette {
+  background: radial-gradient(circle, transparent 42%, rgba(38, 38, 31, 0.27) 100%);
+  animation: tired-breath 2.8s ease-in-out infinite;
+}
+
+@keyframes rain-screen {
+  from { transform: translate3d(-12px, -32px, 0); }
+  to { transform: translate3d(12px, 32px, 0); }
+}
+
+@keyframes lightning-screen {
+  0%, 91%, 94%, 100% { opacity: 0.36; }
+  92%, 93% { opacity: 0.9; }
+}
+
+@keyframes tired-breath {
+  50% { opacity: 0.72; }
+}
+
 .game-canvas {
   position: absolute;
   inset: 0;
@@ -218,6 +261,77 @@ button {
   border-radius: inherit;
   background: linear-gradient(90deg, #cce86b, #77d88c);
   transition: width 0.25s ease;
+}
+
+.energy-card > small {
+  display: block;
+  margin-top: 7px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.vehicle-card {
+  position: absolute;
+  right: 215px;
+  bottom: 25px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 245px;
+  padding: 10px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 17px;
+  background: rgba(18, 32, 27, 0.84);
+  color: white;
+  box-shadow: 0 12px 32px rgba(16, 34, 27, 0.2);
+  backdrop-filter: blur(12px);
+}
+
+.vehicle-speed {
+  min-width: 55px;
+  padding-right: 11px;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  text-align: center;
+}
+
+.vehicle-speed b,
+.vehicle-speed span,
+.vehicle-data span {
+  display: block;
+}
+
+.vehicle-speed b {
+  font-family: Georgia, serif;
+  font-size: 28px;
+  line-height: 0.9;
+}
+
+.vehicle-speed span,
+.vehicle-data span {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 9px;
+}
+
+.vehicle-data {
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.vehicle-gauge {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.vehicle-gauge i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--lime);
 }
 
 .controls-hint {
@@ -968,6 +1082,164 @@ kbd {
   line-height: 1.55;
 }
 
+.wardrobe-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.wardrobe-head small {
+  color: #77907f;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wardrobe-head p {
+  max-width: 620px;
+  margin: 7px 0 0;
+  color: #748178;
+}
+
+.outfit-current {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  border-radius: 99px;
+  background: #315c45;
+  color: #dff09a;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.wardrobe-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.outfit-card {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  min-height: 205px;
+  overflow: hidden;
+  border: 1px solid #d8ddca;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.outfit-card.active {
+  border-color: #769551;
+  box-shadow: inset 0 0 0 2px rgba(118, 149, 81, 0.18);
+}
+
+.outfit-preview {
+  position: relative;
+  min-height: 205px;
+  overflow: hidden;
+}
+
+.outfit-preview::before {
+  content: "";
+  position: absolute;
+  left: 40px;
+  top: 24px;
+  width: 42px;
+  height: 42px;
+  border-radius: 46% 46% 42% 42%;
+  background: #d5a26e;
+  box-shadow: inset -7px -3px 0 rgba(109, 68, 45, 0.12);
+}
+
+.outfit-preview > span {
+  position: absolute;
+  left: 30px;
+  top: 67px;
+  width: 62px;
+  height: 82px;
+  border-radius: 18px 18px 10px 10px;
+}
+
+.outfit-preview > i {
+  position: absolute;
+  left: 43px;
+  top: 70px;
+  width: 36px;
+  height: 73px;
+  border-radius: 10px;
+}
+
+.outfit-preview > b {
+  position: absolute;
+  left: 36px;
+  top: 143px;
+  width: 50px;
+  height: 50px;
+  border-radius: 4px 4px 11px 11px;
+  box-shadow: inset 23px 0 0 rgba(255, 255, 255, 0.08);
+}
+
+.outfit-copy {
+  padding: 16px;
+}
+
+.outfit-copy > small {
+  color: #809087;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.outfit-copy h3 {
+  margin: 4px 0 6px;
+  font-family: Georgia, serif;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.outfit-copy p {
+  min-height: 39px;
+  margin: 0;
+  color: #718078;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.outfit-mods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 12px 0;
+}
+
+.outfit-mods span {
+  padding: 4px 6px;
+  border-radius: 7px;
+  background: #e8edda;
+  color: #536c48;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.outfit-button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: #315c45;
+  color: white;
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.outfit-button.active {
+  background: #dbe7bc;
+  color: #526b44;
+  cursor: default;
+}
+
 .client-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1353,12 +1625,18 @@ kbd {
   margin-top: 24px;
 }
 
-.office-nav div {
+.office-nav button {
+  width: 100%;
+  display: block;
   margin: 5px 0;
   padding: 10px;
+  border: 0;
   border-radius: 10px;
+  background: transparent;
   color: rgba(255, 255, 255, 0.42);
   font-size: 11px;
+  text-align: left;
+  cursor: pointer;
 }
 
 .office-nav .active {
@@ -1404,6 +1682,190 @@ kbd {
   font-size: 10px;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.live-pill.calm {
+  background: #e2e4d4;
+  color: #687362;
+}
+
+.office-room {
+  min-height: 100%;
+}
+
+.office-room-message {
+  margin: 18px 0 0;
+  padding: 11px 14px;
+  border-left: 3px solid #9caf65;
+  border-radius: 0 12px 12px 0;
+  background: rgba(255, 255, 255, 0.58);
+  color: #68756d;
+  font-size: 11px;
+}
+
+.office-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 13px;
+  margin-top: 18px;
+}
+
+.office-zone-card {
+  min-height: 250px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(53, 76, 64, 0.14);
+  border-radius: 19px;
+  background:
+    linear-gradient(0deg, rgba(19, 34, 28, 0.7), rgba(19, 34, 28, 0.04) 70%),
+    linear-gradient(135deg, #a3b98c, #d6d2ad);
+  color: white;
+  box-shadow: 0 14px 34px rgba(29, 52, 42, 0.1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.office-zone-card.coffee {
+  background:
+    linear-gradient(0deg, rgba(53, 36, 25, 0.72), transparent 72%),
+    linear-gradient(135deg, #c78f58, #e3c38e);
+}
+
+.office-zone-card.sofa {
+  background:
+    linear-gradient(0deg, rgba(29, 47, 42, 0.75), transparent 72%),
+    linear-gradient(135deg, #547c71, #acc0a2);
+}
+
+.office-zone-card.books,
+.office-zone-card.storage {
+  background:
+    linear-gradient(0deg, rgba(33, 44, 38, 0.78), transparent 72%),
+    repeating-linear-gradient(90deg, #a67b55 0 18px, #c49769 19px 38px);
+}
+
+.office-zone-card.passive {
+  cursor: default;
+  filter: saturate(0.78);
+}
+
+.office-zone-card:disabled {
+  opacity: 0.62;
+  cursor: wait;
+}
+
+.office-zone-card > span {
+  margin-bottom: auto;
+  font-family: Georgia, serif;
+  font-size: 46px;
+  text-shadow: 0 5px 18px rgba(18, 30, 25, 0.22);
+}
+
+.office-zone-card b,
+.office-zone-card small {
+  display: block;
+}
+
+.office-zone-card b {
+  margin-bottom: 7px;
+  font-family: Georgia, serif;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.office-zone-card small {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.garage-stage {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.1fr) minmax(260px, 0.9fr);
+  align-items: center;
+  gap: 30px;
+  min-height: 450px;
+  margin-top: 18px;
+  padding: 30px;
+  border-radius: 22px;
+  background:
+    linear-gradient(90deg, transparent 49%, rgba(255, 255, 255, 0.05) 50% 51%, transparent 52%),
+    repeating-linear-gradient(0deg, #26332f 0 39px, #2d3c37 40px 80px);
+  color: white;
+}
+
+.garage-car {
+  position: relative;
+  height: 210px;
+  border-radius: 24px 62px 20px 18px;
+  background: #b94836;
+  box-shadow: inset 0 -35px 0 #943a2c, 0 30px 40px rgba(0, 0, 0, 0.28);
+}
+
+.garage-car::before {
+  content: "";
+  position: absolute;
+  left: 27%;
+  top: -68px;
+  width: 48%;
+  height: 76px;
+  border-radius: 24px 44px 3px 3px;
+  background: #769a99;
+  border: 14px solid #ad4838;
+}
+
+.garage-car i,
+.garage-car span {
+  position: absolute;
+  bottom: -23px;
+  width: 68px;
+  height: 68px;
+  border: 13px solid #111714;
+  border-radius: 50%;
+  background: #8d9b92;
+}
+
+.garage-car i { left: 12%; }
+.garage-car span { right: 12%; }
+
+.garage-stage small {
+  color: #aebbb3;
+  text-transform: uppercase;
+}
+
+.garage-stage h3 {
+  margin: 7px 0;
+  font-family: Georgia, serif;
+  font-size: 25px;
+  font-weight: 500;
+}
+
+.garage-stage p {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.garage-upgrade {
+  margin-top: 12px;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--lime);
+  color: #2f4d3b;
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.garage-upgrade:disabled {
+  background: #56645d;
+  color: #aeb9b2;
+  cursor: default;
 }
 
 .monitor-grid {
@@ -1611,6 +2073,8 @@ kbd {
   .client-grid,
   .skill-grid,
   .finance-row,
+  .wardrobe-grid,
+  .office-zone-grid,
   .tariffs {
     grid-template-columns: 1fr;
   }
@@ -1661,7 +2125,30 @@ kbd {
     display: none;
   }
 
+  .office-main {
+    border-radius: 18px;
+    padding: 20px;
+  }
+
   .monitor-grid {
     grid-template-columns: 1fr;
+  }
+
+  .garage-stage {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .garage-car {
+    height: 140px;
+    margin: 60px 0 20px;
+  }
+
+  .vehicle-card {
+    right: 164px;
+    bottom: 24px;
+    min-width: 205px;
+    transform: scale(0.86);
+    transform-origin: right bottom;
   }
 }
