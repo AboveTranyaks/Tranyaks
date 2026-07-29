@@ -4,16 +4,87 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "world" | "dialogue" | "tablet" | "map" | "pause" | "tariff" | "office";
+type GameMode = "intro" | "network" | "world" | "dialogue" | "tablet" | "map" | "pause" | "tariff" | "office";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
 type SurfaceKind = "Асфальт" | "Грунт" | "Трава";
 type MovementState = "Покой" | "Шаг" | "Быстрый шаг" | "Бег трусцой";
-type TabletTab = "hero" | "wardrobe" | "clients" | "finance" | "profile" | "rating" | "saves";
+type TabletTab = "hero" | "quests" | "wardrobe" | "clients" | "contracts" | "development" | "fleet" | "shops" | "finance" | "profile" | "rating" | "saves";
 type SaveSlotId = "auto" | "slot1" | "slot2" | "slot3";
 type PrivacyMode = "all" | "summary" | "hidden";
 type AvatarId = "avatar_01" | "avatar_02" | "avatar_03" | "avatar_04";
+type DistrictId = "central" | "residential" | "industrial" | "elite";
+type VehicleId = "old_sedan" | "oka" | "granta" | "camry" | "largus" | "niva" | "pickup" | "gazelle" | "supra" | "enduro";
+
+type StaffState = {
+  dispatchers: number;
+  gbrCrews: number;
+  technicians: number;
+  salesManagers: number;
+  cleaners: number;
+};
+
+type LoanState = {
+  principal: number;
+  months: number;
+} | null;
+
+type QuestStatus = "active" | "completed" | "failed";
+type QuestCategory = "main" | "side" | "dynamic" | "daily";
+type QuestProgress = {
+  id: string;
+  status: QuestStatus;
+  tracked: boolean;
+  read: boolean;
+};
+
+type DailyMetric = "contracts" | "talks" | "alarms" | "drive_km" | "drifts" | "office_actions" | "upgrades" | "profit";
+type DailyChallengeProgress = {
+  id: string;
+  metric: DailyMetric;
+  progress: number;
+  claimed: boolean;
+  tracked: boolean;
+};
+type DailyChallengeState = {
+  lastUpdateDate: string;
+  lastLoginDate: string;
+  streakCount: number;
+  previousIds: string[];
+  bonusClaimed: boolean;
+  activeChallenges: DailyChallengeProgress[];
+};
+
+type NetworkPlayer = {
+  id: string;
+  name: string;
+  avatar: AvatarId;
+  x: number;
+  z: number;
+  rotation: number;
+  role: "Менеджер" | "Оператор" | "ГБР";
+  host: boolean;
+};
+
+type NetworkChatMessage = {
+  id: string;
+  author: string;
+  text: string;
+  sentAt: string;
+};
+
+type AlarmEvent = {
+  scenario: "false" | "intrusion" | "fire" | "panic";
+  type: string;
+  address: string;
+  client: string;
+  tariff: "Эконом" | "Стандарт" | "Премиум";
+  sensors: string[];
+  history: string;
+  correct: "call" | "gbr" | "fire" | "police";
+  timeout: number;
+};
 
 type PlayerProfile = {
   id: string;
@@ -77,6 +148,19 @@ type SaveData = {
   statistics?: PlayerStatistics;
   achievements?: string[];
   mapNotes?: MapNote[];
+  extendedContracts?: string[];
+  openedBranches?: DistrictId[];
+  staff?: StaffState;
+  ownedVehicles?: VehicleId[];
+  currentVehicle?: VehicleId;
+  loan?: LoanState;
+  businessMonth?: number;
+  officeRented?: boolean;
+  quests?: QuestProgress[];
+  dailyChallenges?: DailyChallengeState;
+  vehicleSiren?: boolean;
+  carClean?: boolean;
+  seasonalTires?: boolean;
 };
 
 type SaveEnvelope = {
@@ -146,6 +230,223 @@ const TARIFFS = [
   { name: "Премиум", price: 1490, bonus: 1490, note: "Камеры, приложение и приоритетный выезд" },
 ];
 
+type DistrictSpec = {
+  id: DistrictId;
+  name: string;
+  subtitle: string;
+  x: number;
+  reputation: number;
+  contracts: number;
+  openingCost: number;
+  monthlyRent: number;
+  color: string;
+};
+
+type SecurityObject = {
+  id: string;
+  district: DistrictId;
+  name: string;
+  address: string;
+  objectType: string;
+  commercial: boolean;
+  installation: [number, number];
+  monthly: [number, number];
+};
+
+type VehicleSpec = {
+  id: VehicleId;
+  name: string;
+  className: string;
+  price: number;
+  usedPrice: number;
+  maxSpeed: number;
+  fuelUse: number;
+  capacity: number;
+  description: string;
+};
+
+const DISTRICTS: DistrictSpec[] = [
+  { id: "central", name: "Центральный район", subtitle: "Первореченское", x: 0, reputation: 0, contracts: 10, openingCost: 0, monthlyRent: 5000, color: "#8fb6a5" },
+  { id: "residential", name: "Жилой район", subtitle: "Новые кварталы", x: 1350, reputation: 25, contracts: 20, openingCost: 20000, monthlyRent: 7000, color: "#c7ad78" },
+  { id: "industrial", name: "Промышленный район", subtitle: "Склады и производства", x: 2700, reputation: 45, contracts: 35, openingCost: 35000, monthlyRent: 9000, color: "#88929b" },
+  { id: "elite", name: "Элитный район", subtitle: "Станица Динская", x: 4000, reputation: 65, contracts: 50, openingCost: 50000, monthlyRent: 12000, color: "#b99c79" },
+];
+
+const RESIDENTIAL_PRICES = [
+  { type: "Частный дом", install: [3000, 15000] as [number, number], monthly: [500, 3000] as [number, number] },
+  { type: "Таунхаус", install: [2500, 12000] as [number, number], monthly: [400, 2500] as [number, number] },
+  { type: "Квартира", install: [2000, 10000] as [number, number], monthly: [300, 2000] as [number, number] },
+  { type: "Коттедж", install: [5000, 22000] as [number, number], monthly: [800, 4500] as [number, number] },
+  { type: "Особняк", install: [10000, 45000] as [number, number], monthly: [1500, 8000] as [number, number] },
+  { type: "Дача", install: [2000, 8000] as [number, number], monthly: [250, 1200] as [number, number] },
+];
+
+const COMMERCIAL_PRICES = [
+  { type: "Продуктовый магазин", install: [12000, 25000] as [number, number], monthly: [3000, 6000] as [number, number] },
+  { type: "Аптека", install: [15000, 30000] as [number, number], monthly: [4000, 8000] as [number, number] },
+  { type: "Кафе", install: [18000, 35000] as [number, number], monthly: [5000, 10000] as [number, number] },
+  { type: "Автосервис", install: [14000, 28000] as [number, number], monthly: [3500, 7000] as [number, number] },
+  { type: "Склад", install: [25000, 50000] as [number, number], monthly: [6000, 12000] as [number, number] },
+  { type: "Школа", install: [30000, 60000] as [number, number], monthly: [10000, 20000] as [number, number] },
+];
+
+const SECURITY_OBJECTS: SecurityObject[] = DISTRICTS.flatMap((district, districtIndex) =>
+  Array.from({ length: 15 }, (_, index) => {
+    const commercial = index >= 10;
+    const price = commercial
+      ? COMMERCIAL_PRICES[(index + districtIndex) % COMMERCIAL_PRICES.length]
+      : RESIDENTIAL_PRICES[(index + districtIndex) % RESIDENTIAL_PRICES.length];
+    const street = ["Садовая", "Новая", "Школьная", "Промышленная", "Кленовая"][index % 5];
+    return {
+      id: `${district.id}-${index + 1}`,
+      district: district.id,
+      name: commercial ? price.type : `${price.type} № ${districtIndex * 15 + index + 1}`,
+      address: `${street}, ${districtIndex * 20 + index + 1}`,
+      objectType: price.type,
+      commercial,
+      installation: price.install,
+      monthly: price.monthly,
+    };
+  }),
+);
+
+const VEHICLES: VehicleSpec[] = [
+  { id: "old_sedan", name: "Старый седан", className: "Стартовый", price: 15000, usedPrice: 9000, maxSpeed: 90, fuelUse: 8.8, capacity: 4, description: "Верный, простой и уже ваш." },
+  { id: "oka", name: "Ока city", className: "Микролитражка", price: 25000, usedPrice: 12000, maxSpeed: 80, fuelUse: 3.5, capacity: 2, description: "Экономична и удобна на узких улицах." },
+  { id: "granta", name: "Лада Гранта", className: "Седан эконом", price: 45000, usedPrice: 25000, maxSpeed: 150, fuelUse: 6, capacity: 4, description: "Надёжная рабочая машина менеджера." },
+  { id: "camry", name: "Toyota Camry", className: "Седан бизнес", price: 90000, usedPrice: 55000, maxSpeed: 190, fuelUse: 8.5, capacity: 4, description: "Повышает доверие премиальных клиентов." },
+  { id: "largus", name: "Лада Ларгус", className: "Универсал", price: 65000, usedPrice: 35000, maxSpeed: 155, fuelUse: 7, capacity: 5, description: "Перевозит до 200 кг оборудования." },
+  { id: "niva", name: "Нива 4×4", className: "Внедорожник", price: 70000, usedPrice: 40000, maxSpeed: 135, fuelUse: 10, capacity: 4, description: "Уверенно идёт по грунту и полям." },
+  { id: "pickup", name: "УАЗ Пикап", className: "Пикап", price: 80000, usedPrice: 45000, maxSpeed: 145, fuelUse: 11, capacity: 2, description: "Перевозит до 500 кг и мобильный пульт." },
+  { id: "gazelle", name: "Газель ГБР", className: "Фургон", price: 120000, usedPrice: 70000, maxSpeed: 125, fuelUse: 14, capacity: 6, description: "Экипаж ГБР и до 1000 кг оборудования." },
+  { id: "supra", name: "Supra lowpoly", className: "Спорткар", price: 180000, usedPrice: 100000, maxSpeed: 230, fuelUse: 15, capacity: 2, description: "Очень быстрая, престижная и непрактичная." },
+  { id: "enduro", name: "Эндуро 250", className: "Мотоцикл", price: 35000, usedPrice: 20000, maxSpeed: 125, fuelUse: 3, capacity: 1, description: "Проезжает по тропинкам, но не возит груз." },
+];
+
+const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map((vehicle) => [vehicle.id, vehicle])) as Record<VehicleId, VehicleSpec>;
+const EMPTY_STAFF: StaffState = { dispatchers: 0, gbrCrews: 0, technicians: 0, salesManagers: 0, cleaners: 0 };
+const STAFF_ROLES = [
+  { key: "dispatchers", name: "Диспетчер", salary: 8000, description: "Обрабатывает обычные тревоги." },
+  { key: "gbrCrews", name: "Экипаж ГБР", salary: 12000, description: "Выезжает на реальные угрозы." },
+  { key: "technicians", name: "Техник", salary: 7000, description: "Обслуживает оборудование клиентов." },
+  { key: "salesManagers", name: "Менеджер продаж", salary: 6000, description: "Готовит новые договоры." },
+  { key: "cleaners", name: "Уборщик", salary: 2000, description: "Поддерживает офис и настроение команды." },
+] as const;
+
+const QUESTS = [
+  {
+    id: "quest_open_office",
+    category: "main" as QuestCategory,
+    icon: "★",
+    title: "Открыть своё дело",
+    short: "Набрать первые договоры и арендовать центральный офис.",
+    full: "Алексей вернулся домой с 15 000 ₽ и старым седаном. Чтобы запустить пульт, нужно убедить жителей доверить ему первые десять объектов и оформить офис.",
+    reward: "5 000 ₽ · +20 репутации · режим пульта",
+    target: { x: 92, z: -18, label: "Центральный офис" },
+  },
+  {
+    id: "quest_garage_secrets",
+    category: "side" as QuestCategory,
+    icon: "!",
+    title: "Гаражные тайны",
+    short: "Помочь Семёну Петровичу с датчиком в гараже.",
+    full: "Семён согласен испытать систему, если Алексей лично проверит гараж и привезёт комплект датчиков.",
+    reward: "2 000 ₽ · гаечный ключ · +5 репутации",
+    target: { x: -48, z: 20, label: "Гараж Семёна Петровича" },
+  },
+  {
+    id: "quest_false_alarm_wave",
+    category: "dynamic" as QuestCategory,
+    icon: "⚡",
+    title: "Эпидемия ложных тревог",
+    short: "Проверить серию подозрительных срабатываний.",
+    full: "В районе участились одиночные сигналы движения. Сравните журнал пульта и правильно обработайте три тревоги.",
+    reward: "4 500 ₽ · +8 репутации",
+    target: { x: 18, z: 52, label: "Проблемный объект" },
+  },
+  {
+    id: "quest_daily_sales",
+    category: "daily" as QuestCategory,
+    icon: "◷",
+    title: "Два договора за день",
+    short: "Заключить два новых договора.",
+    full: "Ежедневная задача отдела продаж. Хороший способ пополнить оборотные средства.",
+    reward: "1 000 ₽ · +2 репутации",
+    target: { x: 3, z: -22, label: "Доска объявлений" },
+  },
+  {
+    id: "quest_competitor",
+    category: "main" as QuestCategory,
+    icon: "★",
+    title: "Конкурент",
+    short: "Подготовиться к противостоянию с ЧОП «Витязь».",
+    full: "После первого успешного месяца конкуренты пытаются переманить клиентов. Поговорите с тремя жильцами, найдите свидетельства и подготовьтесь к собранию.",
+    reward: "Уникальный значок · +30 репутации",
+    target: { x: 1350, z: 20, label: "Собрание жильцов" },
+  },
+] as const;
+
+const DEFAULT_QUESTS: QuestProgress[] = [
+  { id: "quest_open_office", status: "active", tracked: true, read: false },
+  { id: "quest_false_alarm_wave", status: "active", tracked: false, read: true },
+  { id: "quest_daily_sales", status: "active", tracked: false, read: true },
+];
+
+const DAILY_CHALLENGES = [
+  { id: "daily_contracts", category: "manager", icon: "●", title: "День контрактов", description: "Заключите 2 новых договора", metric: "contracts" as DailyMetric, target: 2, money: 600, reputation: 18 },
+  { id: "daily_talks", category: "manager", icon: "●", title: "Соседская дипломатия", description: "Поговорите с 5 жителями", metric: "talks" as DailyMetric, target: 5, money: 450, reputation: 15 },
+  { id: "daily_alarms", category: "console", icon: "◆", title: "Быстрая реакция", description: "Обработайте 3 тревоги", metric: "alarms" as DailyMetric, target: 3, money: 800, reputation: 25 },
+  { id: "daily_shift", category: "console", icon: "◆", title: "Дежурный", description: "Примите решение по одной тревоге", metric: "alarms" as DailyMetric, target: 1, money: 500, reputation: 14 },
+  { id: "daily_drive", category: "driving", icon: "◉", title: "Драйв", description: "Проедьте 10 км", metric: "drive_km" as DailyMetric, target: 10, money: 700, reputation: 20 },
+  { id: "daily_drift", category: "driving", icon: "◉", title: "Король дрифта", description: "Совершите 5 управляемых заносов", metric: "drifts" as DailyMetric, target: 5, money: 650, reputation: 18 },
+  { id: "daily_mechanic", category: "driving", icon: "◉", title: "Механик", description: "Улучшите или купите автомобиль", metric: "upgrades" as DailyMetric, target: 1, money: 550, reputation: 16 },
+  { id: "daily_office", category: "universal", icon: "★", title: "Порядок в офисе", description: "Выполните 2 действия в офисе", metric: "office_actions" as DailyMetric, target: 2, money: 400, reputation: 12 },
+  { id: "daily_profit", category: "universal", icon: "★", title: "Финансист", description: "Заработайте 5 000 ₽", metric: "profit" as DailyMetric, target: 5000, money: 800, reputation: 22 },
+] as const;
+
+const localDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+function createDailyChallenges(previous: DailyChallengeState | undefined, officeAvailable: boolean): DailyChallengeState {
+  const today = localDateKey();
+  if (previous?.lastUpdateDate === today) return previous;
+  const previousIds = previous?.activeChallenges.map((challenge) => challenge.id) ?? [];
+  const categories = officeAvailable ? ["manager", "console", "driving", "universal"] : ["manager", "manager", "driving", "universal"];
+  const seed = Number(today.replaceAll("-", ""));
+  const activeChallenges = categories.map((category, index) => {
+    const available = DAILY_CHALLENGES.filter((challenge) => challenge.category === category && !previousIds.includes(challenge.id));
+    const fallback = DAILY_CHALLENGES.filter((challenge) => challenge.category === category);
+    const pool = available.length ? available : fallback;
+    const selected = pool[(seed + index * 7) % pool.length];
+    return { id: selected.id, metric: selected.metric, progress: 0, claimed: false, tracked: index < 2 };
+  });
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const continued = previous?.lastLoginDate === localDateKey(yesterday);
+  return {
+    lastUpdateDate: today,
+    lastLoginDate: today,
+    streakCount: continued ? previous.streakCount : 0,
+    previousIds,
+    bonusClaimed: false,
+    activeChallenges,
+  };
+}
+
+function createAlarmEvent(): AlarmEvent {
+  const roll = Math.random();
+  const tariff = (["Эконом", "Стандарт", "Премиум"] as const)[Math.floor(Math.random() * 3)];
+  const timeout = tariff === "Эконом" ? 45 : tariff === "Стандарт" ? 60 : 90;
+  if (roll < 0.7) return { scenario: "false", type: "Датчик движения", address: "Садовая, 5 · гараж", client: "Семён Петрович", tariff, sensors: ["Движение: гараж"], history: "1 ложная тревога · обслуживание 12 дней назад", correct: "call", timeout };
+  if (roll < 0.85) return { scenario: "intrusion", type: "Проникновение", address: "Новая, 12 · первый этаж", client: "Алина", tariff, sensors: ["Открытие окна", "Движение: холл", "Разбитие стекла"], history: "Ранее сигналов не было", correct: "gbr", timeout };
+  if (roll < 0.95) return { scenario: "fire", type: "Пожарная тревога", address: "Школьная, 4 · кухня", client: "Ольга", tariff, sensors: ["Дым", "Температура +18°C", "Дым: коридор"], history: "Датчики проверены 4 дня назад", correct: "fire", timeout };
+  return { scenario: "panic", type: "Кнопка паники", address: "Советская, 21 · двор", client: "Андрей", tariff: "Премиум", sensors: ["Ручная тревога", "Шум у входа"], history: "Высший приоритет · клиент на связи", correct: "police", timeout: 90 };
+}
+
 const REPLIES: { kind: ReplyKind; label: string }[] = [
   { kind: "info", label: "В соседнем районе число краж выросло. Покажу реальные цифры." },
   { kind: "empathy", label: "Понимаю вас. Дом — это прежде всего спокойствие семьи." },
@@ -157,6 +458,12 @@ const WORLD_KEY_POINTS = [
   { id: "office", label: "Офис охраны", short: "О", x: 92, z: -18, kind: "office" },
   { id: "shop", label: "Магазин", short: "М", x: 3, z: -22, kind: "service" },
   { id: "school", label: "Школа", short: "Ш", x: -72, z: 34, kind: "service" },
+  { id: "residential-office", label: "Жилой филиал", short: "О", x: 1350, z: -34, kind: "office" },
+  { id: "dealer", label: "Автосалон", short: "А", x: 1390, z: 34, kind: "service" },
+  { id: "industrial-office", label: "Промышленный филиал", short: "О", x: 2700, z: -34, kind: "office" },
+  { id: "warehouse", label: "Складской комплекс", short: "С", x: 2745, z: 42, kind: "service" },
+  { id: "bank", label: "Банк", short: "Б", x: 3970, z: 26, kind: "service" },
+  { id: "gas", label: "АЗС", short: "Т", x: 2860, z: -18, kind: "service" },
   { id: "river", label: "Река Кочеты", short: "Р", x: 0, z: 180, kind: "nature" },
   { id: "dinskaya", label: "Центр станицы Динской", short: "Д", x: 4000, z: -24, kind: "village" },
 ] as const;
@@ -273,7 +580,7 @@ const LEADERBOARD_SEED = [
 ] as const;
 
 const DEFAULT_SAVE: SaveData = {
-  money: 5000,
+  money: 15000,
   reputation: 0,
   contracts: [],
   interests: {},
@@ -290,6 +597,19 @@ const DEFAULT_SAVE: SaveData = {
   statistics: EMPTY_STATS,
   achievements: [],
   mapNotes: [],
+  extendedContracts: [],
+  openedBranches: ["central"],
+  staff: EMPTY_STAFF,
+  ownedVehicles: ["old_sedan"],
+  currentVehicle: "old_sedan",
+  loan: null,
+  businessMonth: 1,
+  officeRented: false,
+  quests: DEFAULT_QUESTS,
+  dailyChallenges: createDailyChallenges(undefined, false),
+  vehicleSiren: false,
+  carClean: false,
+  seasonalTires: false,
 };
 
 function checksum(data: SaveData) {
@@ -312,6 +632,19 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
     statistics: { ...EMPTY_STATS, ...(value?.statistics ?? {}) },
     achievements: Array.isArray(value?.achievements) ? value.achievements : [],
     mapNotes: Array.isArray(value?.mapNotes) ? value.mapNotes : [],
+    extendedContracts: Array.isArray(value?.extendedContracts) ? value.extendedContracts : [],
+    openedBranches: Array.isArray(value?.openedBranches) ? value.openedBranches : ["central"],
+    staff: { ...EMPTY_STAFF, ...(value?.staff ?? {}) },
+    ownedVehicles: Array.isArray(value?.ownedVehicles) ? value.ownedVehicles : ["old_sedan"],
+    currentVehicle: value?.currentVehicle && VEHICLE_BY_ID[value.currentVehicle] ? value.currentVehicle : "old_sedan",
+    loan: value?.loan ?? null,
+    businessMonth: value?.businessMonth ?? 1,
+    officeRented: value?.officeRented ?? false,
+    quests: Array.isArray(value?.quests) ? value.quests : DEFAULT_QUESTS,
+    dailyChallenges: createDailyChallenges(value?.dailyChallenges, value?.officeRented ?? false),
+    vehicleSiren: value?.vehicleSiren ?? false,
+    carClean: value?.carClean ?? false,
+    seasonalTires: value?.seasonalTires ?? false,
   };
 }
 
@@ -374,7 +707,7 @@ function queueStatistics(profile: PlayerProfile, statistics: PlayerStatistics) {
 
 function surfaceAt(x: number, z: number): SurfaceKind {
   if (Math.abs(z) <= 8) return "Асфальт";
-  for (const centre of [0, 4000]) {
+  for (const centre of DISTRICTS.map((district) => district.x)) {
     if (Math.abs(x - (centre + 18)) <= 7 && z > -165 && z < 190) return "Асфальт";
     if (Math.abs(x - centre) <= 132 && (Math.abs(z - 72) <= 6 || Math.abs(z + 72) <= 5.5)) return "Грунт";
   }
@@ -818,6 +1151,7 @@ export default function SecurityConsoleGame() {
     residents: Resident[];
     colliders: WorldCollider[];
     walkers: Walker[];
+    remoteMeshes: Map<string, THREE.Group>;
     nearest: Resident | null;
     time: number;
     yaw: number;
@@ -839,6 +1173,7 @@ export default function SecurityConsoleGame() {
     residents: [],
     colliders: [],
     walkers: [],
+    remoteMeshes: new Map(),
     nearest: null,
     time: 8.25,
     yaw: Math.PI,
@@ -871,8 +1206,7 @@ export default function SecurityConsoleGame() {
   const [tabletTab, setTabletTab] = useState<TabletTab>("hero");
   const [playerPos, setPlayerPos] = useState(initialSave.playerPos ?? { x: -4, z: -2 });
   const [carPos, setCarPos] = useState(initialSave.carPos ?? { x: 3, z: 2 });
-  const [locationName, setLocationName] = useState<"Первореченское" | "станица Динская">("Первореченское");
-  const [distanceToDinskaya, setDistanceToDinskaya] = useState(4);
+  const [locationName, setLocationName] = useState("село Первореченское");
   const [weather, setWeather] = useState<WeatherKind>(initialSave.weather ?? "Ясно");
   const weatherRef = useRef<WeatherKind>(initialSave.weather ?? "Ясно");
   const [movementState, setMovementState] = useState<MovementState>("Покой");
@@ -883,11 +1217,18 @@ export default function SecurityConsoleGame() {
   const ownedOutfitsRef = useRef<OutfitId[]>(initialOwned);
   const [carUpgrade, setCarUpgrade] = useState(initialCarUpgrade);
   const carUpgradeRef = useRef(initialCarUpgrade);
+  const [vehicleSiren, setVehicleSiren] = useState(initialSave.vehicleSiren ?? false);
+  const vehicleSirenRef = useRef(vehicleSiren);
+  const [carClean, setCarClean] = useState(initialSave.carClean ?? false);
+  const carCleanRef = useRef(carClean);
+  const [seasonalTires, setSeasonalTires] = useState(initialSave.seasonalTires ?? false);
+  const seasonalTiresRef = useRef(seasonalTires);
   const [officeZone, setOfficeZone] = useState<OfficeZone>("console");
   const [coffeeReady, setCoffeeReady] = useState(true);
   const [equipment, setEquipment] = useState(6);
   const [officeMessage, setOfficeMessage] = useState("Офис готов к работе. Выберите помещение слева.");
-  const [alarm, setAlarm] = useState<null | { type: string; address: string; correct: string }>(null);
+  const [alarm, setAlarm] = useState<AlarmEvent | null>(null);
+  const [alarmSeconds, setAlarmSeconds] = useState(0);
   const [alarmResult, setAlarmResult] = useState("Система в норме. Ожидаем сигнал.");
   const [profile, setProfile] = useState<PlayerProfile>(initialProfile);
   const profileRef = useRef(profile);
@@ -901,6 +1242,43 @@ export default function SecurityConsoleGame() {
   const achievementsRef = useRef(achievements);
   const [mapNotes, setMapNotes] = useState<MapNote[]>(initialSave.mapNotes ?? []);
   const mapNotesRef = useRef(mapNotes);
+  const [extendedContracts, setExtendedContracts] = useState<string[]>(initialSave.extendedContracts ?? []);
+  const extendedContractsRef = useRef(extendedContracts);
+  const [openedBranches, setOpenedBranches] = useState<DistrictId[]>(initialSave.openedBranches ?? ["central"]);
+  const openedBranchesRef = useRef(openedBranches);
+  const [staff, setStaff] = useState<StaffState>(initialSave.staff ?? EMPTY_STAFF);
+  const staffRef = useRef(staff);
+  const [ownedVehicles, setOwnedVehicles] = useState<VehicleId[]>(initialSave.ownedVehicles ?? ["old_sedan"]);
+  const ownedVehiclesRef = useRef(ownedVehicles);
+  const [currentVehicle, setCurrentVehicle] = useState<VehicleId>(initialSave.currentVehicle ?? "old_sedan");
+  const currentVehicleRef = useRef(currentVehicle);
+  const [loan, setLoan] = useState<LoanState>(initialSave.loan ?? null);
+  const loanRef = useRef(loan);
+  const [businessMonth, setBusinessMonth] = useState(initialSave.businessMonth ?? 1);
+  const businessMonthRef = useRef(businessMonth);
+  const [officeRented, setOfficeRented] = useState(initialSave.officeRented ?? false);
+  const officeRentedRef = useRef(officeRented);
+  const [quests, setQuests] = useState<QuestProgress[]>(initialSave.quests ?? DEFAULT_QUESTS);
+  const questsRef = useRef(quests);
+  const questStatusesRef = useRef<Record<string, QuestStatus>>(Object.fromEntries(quests.map((quest) => [quest.id, quest.status])));
+  const [questFilter, setQuestFilter] = useState<"all" | QuestCategory | "completed">("all");
+  const [selectedQuestId, setSelectedQuestId] = useState("quest_open_office");
+  const [questView, setQuestView] = useState<"journal" | "daily">("journal");
+  const [dailyChallenges, setDailyChallenges] = useState<DailyChallengeState>(() => createDailyChallenges(initialSave.dailyChallenges, initialSave.officeRented ?? false));
+  const dailyChallengesRef = useRef(dailyChallenges);
+  const dailyDistanceRef = useRef(initialSave.statistics?.kmDriven ?? 0);
+  const [dailyResetLabel, setDailyResetLabel] = useState("");
+  const [networkRoomCode, setNetworkRoomCode] = useState("");
+  const [networkRoomInput, setNetworkRoomInput] = useState("");
+  const [networkRegion, setNetworkRegion] = useState("Europe");
+  const [networkVisibility, setNetworkVisibility] = useState<"open" | "friends">("open");
+  const [networkMaxPlayers, setNetworkMaxPlayers] = useState(4);
+  const [networkIsHost, setNetworkIsHost] = useState(false);
+  const [networkPlayers, setNetworkPlayers] = useState<NetworkPlayer[]>([]);
+  const networkPlayersRef = useRef(networkPlayers);
+  const networkChannelRef = useRef<BroadcastChannel | null>(null);
+  const [networkChat, setNetworkChat] = useState<NetworkChatMessage[]>([]);
+  const [networkChatInput, setNetworkChatInput] = useState("");
   const [saveSlots, setSaveSlots] = useState<Record<SaveSlotId, SaveEnvelope | null>>(() => ({
     auto: readEnvelope("auto"),
     slot1: readEnvelope("slot1"),
@@ -910,17 +1288,53 @@ export default function SecurityConsoleGame() {
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<"all_time" | "monthly" | "weekly">("all_time");
   const [leaderboardCategory, setLeaderboardCategory] = useState<"reputation" | "clients" | "income" | "prevention_rate" | "level">("reputation");
   const [mapLayers, setMapLayers] = useState({ clients: true, vehicles: true, points: true, notes: true });
+  const [minimapRotates, setMinimapRotates] = useState(true);
   const [selectedMapObject, setSelectedMapObject] = useState<string | null>(null);
   const [mapWaypoint, setMapWaypoint] = useState<{ x: number; z: number; label: string } | null>(null);
 
   const signedCount = residents.filter((r) => r.signed).length;
-  const monthlyIncome = residents.filter((r) => r.signed).length * 890;
+  const totalContracts = signedCount + extendedContracts.length;
+  const incomeMultiplier = dailyChallenges.streakCount >= 30 ? 1.05 : 1;
+  const monthlyIncome = Math.round((
+    signedCount * 890 +
+    SECURITY_OBJECTS.filter((object) => {
+      if (!extendedContracts.includes(object.id)) return false;
+      if (object.objectType !== "Дача") return true;
+      const calendarMonth = ((businessMonth - 1) % 12) + 1;
+      return calendarMonth >= 4 && calendarMonth <= 9;
+    }).reduce((sum, object) => sum + object.monthly[0], 0)
+  ) * incomeMultiplier);
+  const staffExpense = STAFF_ROLES.reduce((sum, role) => sum + staff[role.key] * role.salary, 0);
+  const branchExpense = DISTRICTS.filter((district) => openedBranches.includes(district.id) && (district.id !== "central" || officeRented)).reduce((sum, district) => sum + district.monthlyRent, 0);
+  const monthlyExpenses = staffExpense + branchExpense + (ownedVehicles.length >= 3 ? 5000 : 0);
+  const selectedQuest = QUESTS.find((quest) => quest.id === selectedQuestId) ?? QUESTS[0];
   const activeNpc = residents.find((r) => r.id === activeNpcId) ?? null;
 
   const flash = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2400);
   }, []);
+
+  const updateDailyChallenge = useCallback((metric: DailyMetric, amount = 1) => {
+    const next = {
+      ...dailyChallengesRef.current,
+      activeChallenges: dailyChallengesRef.current.activeChallenges.map((challenge) => {
+        if (challenge.metric !== metric || challenge.claimed) return challenge;
+        const definition = DAILY_CHALLENGES.find((item) => item.id === challenge.id);
+        if (!definition) return challenge;
+        const wasComplete = challenge.progress >= definition.target;
+        const progress = Math.min(definition.target, challenge.progress + amount);
+        if (!wasComplete && progress >= definition.target) window.setTimeout(() => flash(`Ежедневное испытание выполнено: ${definition.title}`), 0);
+        return { ...challenge, progress };
+      }),
+    };
+    dailyChallengesRef.current = next;
+    setDailyChallenges(next);
+  }, [flash]);
+  const updateDailyChallengeRef = useRef(updateDailyChallenge);
+  useEffect(() => {
+    updateDailyChallengeRef.current = updateDailyChallenge;
+  }, [updateDailyChallenge]);
 
   const persist = useCallback(
     (nextResidents = residentsRef.current, nextMoney = money, nextRep = reputation, slot: SaveSlotId = "auto", saveName = "Автосохранение") => {
@@ -944,6 +1358,19 @@ export default function SecurityConsoleGame() {
         statistics: statisticsRef.current,
         achievements: achievementsRef.current,
         mapNotes: mapNotesRef.current,
+        extendedContracts: extendedContractsRef.current,
+        openedBranches: openedBranchesRef.current,
+        staff: staffRef.current,
+        ownedVehicles: ownedVehiclesRef.current,
+        currentVehicle: currentVehicleRef.current,
+        loan: loanRef.current,
+        businessMonth: businessMonthRef.current,
+        officeRented: officeRentedRef.current,
+        quests: questsRef.current,
+        dailyChallenges: dailyChallengesRef.current,
+        vehicleSiren: vehicleSirenRef.current,
+        carClean: carCleanRef.current,
+        seasonalTires: seasonalTiresRef.current,
       };
       const envelope = writeEnvelope(slot, saveName, save);
       setSaveSlots((current) => ({ ...current, [slot]: envelope }));
@@ -1024,6 +1451,220 @@ export default function SecurityConsoleGame() {
   useEffect(() => {
     mapNotesRef.current = mapNotes;
   }, [mapNotes]);
+
+  useEffect(() => {
+    extendedContractsRef.current = extendedContracts;
+    openedBranchesRef.current = openedBranches;
+    staffRef.current = staff;
+    ownedVehiclesRef.current = ownedVehicles;
+    currentVehicleRef.current = currentVehicle;
+    loanRef.current = loan;
+    businessMonthRef.current = businessMonth;
+    officeRentedRef.current = officeRented;
+    questsRef.current = quests;
+  }, [extendedContracts, openedBranches, staff, ownedVehicles, currentVehicle, loan, businessMonth, officeRented, quests]);
+
+  useEffect(() => {
+    dailyChallengesRef.current = dailyChallenges;
+  }, [dailyChallenges]);
+
+  useEffect(() => {
+    vehicleSirenRef.current = vehicleSiren;
+    carCleanRef.current = carClean;
+    seasonalTiresRef.current = seasonalTires;
+  }, [carClean, seasonalTires, vehicleSiren]);
+
+  useEffect(() => {
+    networkPlayersRef.current = networkPlayers;
+  }, [networkPlayers]);
+
+  useEffect(() => {
+    const updateCountdown = () => {
+      const now = new Date();
+      const next = new Date(now);
+      next.setHours(24, 0, 0, 0);
+      const remaining = Math.max(0, next.getTime() - now.getTime());
+      const hours = Math.floor(remaining / 3_600_000);
+      const minutes = Math.floor((remaining % 3_600_000) / 60_000);
+      setDailyResetLabel(`${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`);
+    };
+    updateCountdown();
+    const timer = window.setInterval(updateCountdown, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!alarm) {
+      setAlarmSeconds(0);
+      return;
+    }
+    setAlarmSeconds(alarm.timeout);
+    const timer = window.setInterval(() => {
+      setAlarmSeconds((seconds) => {
+        if (seconds > 1) return seconds - 1;
+        window.clearInterval(timer);
+        setAlarm(null);
+        setMoney((value) => Math.max(0, value - 1500));
+        setReputation((value) => Math.max(0, value - 10));
+        setAlarmResult("Время реакции истекло · штраф 1 500 ₽ · репутация −10");
+        flash("Тревога пропущена");
+        return 0;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [alarm, flash]);
+
+  const sendNetworkMessage = useCallback((payload: Record<string, unknown>) => {
+    networkChannelRef.current?.postMessage({ ...payload, senderId: profileRef.current.id });
+  }, []);
+
+  useEffect(() => {
+    if (!networkRoomCode) return;
+    if (typeof BroadcastChannel === "undefined") {
+      flash("Этот браузер не поддерживает локальный кооператив");
+      setNetworkRoomCode("");
+      return;
+    }
+    const channel = new BroadcastChannel(`pult-ohrany-${networkRoomCode}`);
+    networkChannelRef.current = channel;
+    const localPlayer = (): NetworkPlayer => ({
+      id: profileRef.current.id,
+      name: profileRef.current.nickname,
+      avatar: profileRef.current.avatar,
+      x: engineRef.current.player?.position.x ?? playerPos.x,
+      z: engineRef.current.player?.position.z ?? playerPos.z,
+      rotation: engineRef.current.player?.rotation.y ?? 0,
+      role: modeRef.current === "office" ? "Оператор" : engineRef.current.driving ? "ГБР" : "Менеджер",
+      host: networkIsHost,
+    });
+    const upsertPlayer = (player: NetworkPlayer) => setNetworkPlayers((current) => {
+      const without = current.filter((item) => item.id !== player.id);
+      return [...without, player].slice(0, networkMaxPlayers);
+    });
+    upsertPlayer(localPlayer());
+    channel.onmessage = (event: MessageEvent<Record<string, unknown>>) => {
+      const message = event.data;
+      if (message.senderId === profileRef.current.id) return;
+      if (message.type === "presence" || message.type === "state") {
+        upsertPlayer(message.player as NetworkPlayer);
+      }
+      if (message.type === "request-world" && networkIsHost) {
+        channel.postMessage({
+          type: "world",
+          senderId: profileRef.current.id,
+          contracts: residentsRef.current.filter((resident) => resident.signed).map((resident) => resident.id),
+          extendedContracts: extendedContractsRef.current,
+          money,
+          reputation,
+          weather: weatherRef.current,
+          gameTime: engineRef.current.time,
+        });
+      }
+      if (message.type === "world" && !networkIsHost) {
+        const contractIds = message.contracts as number[];
+        residentsRef.current.forEach((resident) => { resident.signed = contractIds.includes(resident.id); });
+        setResidents([...residentsRef.current]);
+        const syncedExtended = (message.extendedContracts as string[]) ?? [];
+        extendedContractsRef.current = syncedExtended;
+        setExtendedContracts(syncedExtended);
+        setMoney(Number(message.money ?? money));
+        setReputation(Number(message.reputation ?? reputation));
+        weatherRef.current = message.weather as WeatherKind;
+        setWeather(message.weather as WeatherKind);
+        engineRef.current.time = Number(message.gameTime ?? engineRef.current.time);
+      }
+      if (message.type === "start") setMode("world");
+      if (message.type === "contract") {
+        const resident = residentsRef.current.find((item) => item.id === Number(message.residentId));
+        if (resident) {
+          resident.signed = true;
+          setResidents([...residentsRef.current]);
+        }
+      }
+      if (message.type === "extended-contract") {
+        const objectId = String(message.objectId);
+        if (!extendedContractsRef.current.includes(objectId)) {
+          extendedContractsRef.current = [...extendedContractsRef.current, objectId];
+          setExtendedContracts(extendedContractsRef.current);
+        }
+      }
+      if (message.type === "alarm") setAlarm(message.alarm as AlarmEvent);
+      if (message.type === "economy") {
+        setMoney(Number(message.money ?? money));
+        setReputation(Number(message.reputation ?? reputation));
+      }
+      if (message.type === "world-sync" && !networkIsHost) {
+        engineRef.current.time = Number(message.gameTime ?? engineRef.current.time);
+        weatherRef.current = message.weather as WeatherKind;
+        setWeather(message.weather as WeatherKind);
+      }
+      if (message.type === "chat") setNetworkChat((current) => [...current.slice(-29), message.chat as NetworkChatMessage]);
+      if (message.type === "leave") setNetworkPlayers((current) => current.filter((player) => player.id !== message.senderId));
+    };
+    channel.postMessage({ type: "presence", senderId: profileRef.current.id, player: localPlayer() });
+    channel.postMessage({ type: "request-world", senderId: profileRef.current.id });
+    let syncTicks = 0;
+    const syncTimer = window.setInterval(() => {
+      const player = localPlayer();
+      upsertPlayer(player);
+      channel.postMessage({ type: "state", senderId: profileRef.current.id, player });
+      syncTicks += 1;
+      if (networkIsHost && syncTicks % 120 === 0) channel.postMessage({ type: "world-sync", senderId: profileRef.current.id, gameTime: engineRef.current.time, weather: weatherRef.current });
+    }, 250);
+    return () => {
+      channel.postMessage({ type: "leave", senderId: profileRef.current.id });
+      window.clearInterval(syncTimer);
+      channel.close();
+      networkChannelRef.current = null;
+    };
+  }, [flash, networkIsHost, networkMaxPlayers, networkRoomCode]);
+
+  useEffect(() => {
+    const scene = engineRef.current.scene;
+    if (!scene) return;
+    const remoteIds = new Set(networkPlayers.filter((player) => player.id !== profile.id).map((player) => player.id));
+    engineRef.current.remoteMeshes.forEach((mesh, id) => {
+      if (!remoteIds.has(id)) {
+        scene.remove(mesh);
+        engineRef.current.remoteMeshes.delete(id);
+      }
+    });
+    networkPlayers.forEach((networkPlayer) => {
+      if (networkPlayer.id === profile.id) return;
+      let mesh = engineRef.current.remoteMeshes.get(networkPlayer.id);
+      if (!mesh) {
+        mesh = makeHero();
+        mesh.scale.setScalar(0.96);
+        applyOutfit(mesh, OUTFIT_BY_ID.casual);
+        scene.add(mesh);
+        engineRef.current.remoteMeshes.set(networkPlayer.id, mesh);
+      }
+      mesh.position.set(networkPlayer.x, 0, networkPlayer.z);
+      mesh.rotation.y = networkPlayer.rotation;
+    });
+  }, [networkPlayers, profile.id]);
+
+  useEffect(() => {
+    setQuests((current) => current.map((quest) => {
+      const completed =
+        (quest.id === "quest_open_office" && signedCount >= 10 && officeRented) ||
+        (quest.id === "quest_garage_secrets" && residents[0]?.signed) ||
+        (quest.id === "quest_false_alarm_wave" && statistics.alarmsResponded >= 3) ||
+        (quest.id === "quest_daily_sales" && totalContracts >= 2);
+      return completed && quest.status !== "completed" ? { ...quest, status: "completed" } : quest;
+    }));
+  }, [officeRented, residents, signedCount, statistics.alarmsResponded, totalContracts]);
+
+  useEffect(() => {
+    quests.forEach((progress) => {
+      if (progress.status === "completed" && questStatusesRef.current[progress.id] !== "completed") {
+        const definition = QUESTS.find((quest) => quest.id === progress.id);
+        window.setTimeout(() => flash(`Задание выполнено: ${definition?.title ?? progress.id} · ${definition?.reward ?? "награда получена"}`), 0);
+      }
+      questStatusesRef.current[progress.id] = progress.status;
+    });
+    questsRef.current = quests;
+  }, [flash, quests]);
 
   useEffect(() => {
     const onBeforeUnload = () => persist();
@@ -1142,7 +1783,7 @@ export default function SecurityConsoleGame() {
     for (let x = -145; x <= 4145; x += 14) {
       box(scene, [6, 0.03, 0.28], [x, 0.23, 0], 0xe9e5da);
     }
-    for (const centreX of [0, 4000]) {
+    for (const centreX of DISTRICTS.map((district) => district.x)) {
       box(scene, [13, 0.19, 350], [centreX + 18, 0.12, 15], 0xb7ad98);
       box(scene, [260, 0.19, 10], [centreX, 0.13, 72], 0xb7ad98);
       box(scene, [220, 0.19, 9], [centreX, 0.13, -72], 0xc2ae8a);
@@ -1214,8 +1855,10 @@ export default function SecurityConsoleGame() {
         added += 1;
       }
     };
-    addNeighbourhood(0, 40, 10);
-    addNeighbourhood(4000, 50, 50);
+    addNeighbourhood(0, 15, 10);
+    addNeighbourhood(1350, 25, 25);
+    addNeighbourhood(2700, 25, 50);
+    addNeighbourhood(4000, 25, 75);
 
     // Центр посёлка: магазин, школа, остановка и детская площадка.
     box(scene, [15, 5.4, 10], [3, 2.7, -22], 0xe0b56f);
@@ -1294,6 +1937,22 @@ export default function SecurityConsoleGame() {
       { x: 3928, z: 42, halfX: 12.5, halfZ: 7, kind: "landmark" },
     );
 
+    // Distinct service centres make the two unlockable districts readable from the road.
+    box(scene, [24, 8, 15], [1350, 4, -34], 0xb68f6a);
+    box(scene, [26, 1.2, 17], [1350, 8.5, -34], 0x6e765f);
+    box(scene, [30, 6.5, 18], [1390, 3.25, 34], 0xd8d5ca);
+    box(scene, [31, 0.8, 19], [1390, 6.85, 34], 0x66889a);
+    box(scene, [34, 8, 22], [2700, 4, -34], 0x69737b);
+    box(scene, [35, 1.2, 23], [2700, 8.5, -34], 0x414b53);
+    box(scene, [48, 9, 24], [2745, 4.5, 42], 0x8a735f);
+    box(scene, [49, 1.0, 25], [2745, 9.5, 42], 0x4b555a);
+    engine.colliders.push(
+      { x: 1350, z: -34, halfX: 12.5, halfZ: 8, kind: "landmark" },
+      { x: 1390, z: 34, halfX: 15.5, halfZ: 9.5, kind: "landmark" },
+      { x: 2700, z: -34, halfX: 17.5, halfZ: 11.5, kind: "landmark" },
+      { x: 2745, z: 42, halfX: 24.5, halfZ: 12.5, kind: "landmark" },
+    );
+
     const makeRoadSign = (text: string, x: number, z: number, faceWest = false) => {
       const canvas = document.createElement("canvas");
       canvas.width = 640;
@@ -1322,7 +1981,7 @@ export default function SecurityConsoleGame() {
       box(scene, [0.22, 4, 0.22], [x, 2, z + 3.5], 0x33423d);
     };
     makeRoadSign("ДИНСКАЯ", 205, -12);
-    makeRoadSign("ПЕРВОРЕЧЕНСКОЕ 4 КМ", 3795, -12, true);
+    makeRoadSign("СЕЛО ПЕРОВОРЕЧЕНСКОЕ", 3795, -12, true);
 
     const player = makeHero();
     player.position.set(initialSave.playerPos?.x ?? -4, 0, initialSave.playerPos?.z ?? -3);
@@ -1380,6 +2039,7 @@ export default function SecurityConsoleGame() {
     let last = performance.now();
     let uiTick = 0;
     let statisticsTick = 0;
+    let driftSeconds = 0;
     let previousGameTime = engine.time;
     let mouseDown = false;
     let lastMouseX = 0;
@@ -1458,6 +2118,7 @@ export default function SecurityConsoleGame() {
           setEnergy(Math.round(energyRef.current));
           setActiveNpcId(engine.nearest.id);
           setNpcLine(engine.nearest.greeting);
+          updateDailyChallengeRef.current("talks");
           setMode("dialogue");
         }
       }
@@ -1562,7 +2223,7 @@ export default function SecurityConsoleGame() {
         const gripBase = surface === "Асфальт" ? 1 : surface === "Грунт" ? 0.64 : 0.4;
         const wetGrip = weatherRef.current === "Дождь" || weatherRef.current === "Гроза" ? 0.78 : 1;
         const grip = gripBase * wetGrip * (handbrake ? 0.24 : 1);
-        const maxSpeed = 30.6 * (1 + carUpgradeRef.current * 0.15);
+        const maxSpeed = (VEHICLE_BY_ID[currentVehicleRef.current].maxSpeed / 3.6) * (1 + carUpgradeRef.current * 0.15);
         const acceleration = 6.2 * (1 + carUpgradeRef.current * 0.12) * (surface === "Трава" ? 0.72 : 1);
         if (throttle !== 0 && engine.fuel > 0) {
           const directionPenalty = Math.sign(throttle) !== Math.sign(engine.carSpeed) && Math.abs(engine.carSpeed) > 1 ? 1.65 : 1;
@@ -1588,6 +2249,15 @@ export default function SecurityConsoleGame() {
           (handbrake ? 0.42 : 0.12) *
           Math.sign(engine.carSpeed || 1);
         engine.carSlip = THREE.MathUtils.lerp(engine.carSlip, slipTarget, 1 - Math.pow(grip > 0.72 ? 0.0004 : 0.045, dt));
+        if (Math.abs(engine.carSlip) > 2.4 && Math.abs(engine.carSpeed) > 4) {
+          driftSeconds += dt;
+          if (driftSeconds >= 1) {
+            updateDailyChallengeRef.current("drifts");
+            driftSeconds = -2;
+          }
+        } else {
+          driftSeconds = Math.max(0, driftSeconds);
+        }
         const candidateX = car.position.x + (carDirection.x * engine.carSpeed + carSide.x * engine.carSlip) * dt;
         const candidateZ = car.position.z + (carDirection.z * engine.carSpeed + carSide.z * engine.carSlip) * dt;
         if (!isBlocked(candidateX, candidateZ, 2.25, false)) {
@@ -1596,7 +2266,7 @@ export default function SecurityConsoleGame() {
           const travelled = Math.abs(engine.carSpeed) * dt;
           engine.odometer += travelled / 1000;
           statisticsRef.current.kmDriven += travelled / 1000;
-          engine.fuel = Math.max(0, engine.fuel - travelled * 0.00006 * (1 + Math.abs(throttle) * 0.18));
+          engine.fuel = Math.max(0, engine.fuel - travelled * 0.000006 * VEHICLE_BY_ID[currentVehicleRef.current].fuelUse * (1 + Math.abs(throttle) * 0.18));
         } else {
           const impact = Math.abs(engine.carSpeed);
           engine.carSpeed *= -0.12;
@@ -1787,12 +2457,16 @@ export default function SecurityConsoleGame() {
           surface: engine.surface,
           wear: Math.round(engine.wear),
         });
-        const inDinskaya = focus.position.x > 2000;
-        setLocationName(inDinskaya ? "станица Динская" : "Первореченское");
-        setDistanceToDinskaya(Math.max(0, Math.round(Math.abs(4000 - focus.position.x) / 100) / 10));
+        const currentDistrict = DISTRICTS.reduce((closest, district) =>
+          Math.abs(district.x - focus.position.x) < Math.abs(closest.x - focus.position.x) ? district : closest,
+        );
+        setLocationName(currentDistrict.id === "central" ? "село Первореченское" : currentDistrict.subtitle);
       }
       if (statisticsTick > 1) {
         statisticsTick = 0;
+        const dailyDistance = Math.max(0, statisticsRef.current.kmDriven - dailyDistanceRef.current);
+        if (dailyDistance > 0) updateDailyChallengeRef.current("drive_km", dailyDistance);
+        dailyDistanceRef.current = statisticsRef.current.kmDriven;
         statisticsRef.current.maxIncome = Math.max(statisticsRef.current.maxIncome, residentsRef.current.filter((resident) => resident.signed).length * 890);
         setStatistics({ ...statisticsRef.current });
         if (statisticsRef.current.kmDriven >= 5) unlockAchievement("road_trip");
@@ -1824,7 +2498,10 @@ export default function SecurityConsoleGame() {
     const current = residentsRef.current.find((r) => r.id === activeNpc.id);
     if (!current) return;
     const outfitTrust = Math.min(4, Math.round(OUTFIT_BY_ID[outfitRef.current].trust * 0.4));
-    let change = (kind === current.hook ? 27 : kind === "pressure" ? -11 : 9) + outfitTrust;
+    const vehicleTrust = currentVehicleRef.current === "camry" ? 3 : 0;
+    const cleanCarTrust = carCleanRef.current ? 2 : 0;
+    const presentationTrust = kind === "pressure" ? 0 : vehicleTrust + cleanCarTrust;
+    let change = (kind === current.hook ? 27 : kind === "pressure" ? -11 : 9) + outfitTrust + presentationTrust;
     if (current.archetype === "Вредный" && kind === "pressure") change = 26;
     current.interest = clamp(current.interest + change, 0, 100);
     setResidents([...residentsRef.current]);
@@ -1883,6 +2560,7 @@ export default function SecurityConsoleGame() {
       setEnergy(Math.round(energyRef.current));
       setCoffeeReady(false);
       setOfficeMessage("Тёплый кофе восстановил 15 единиц энергии.");
+      updateDailyChallenge("office_actions");
       window.setTimeout(() => setCoffeeReady(true), 60000);
       return;
     }
@@ -1891,6 +2569,7 @@ export default function SecurityConsoleGame() {
       setEnergy(100);
       engineRef.current.time = (engineRef.current.time + 3) % 24;
       setOfficeMessage("Алексей отдохнул на диване три игровых часа. Энергия восстановлена.");
+      updateDailyChallenge("office_actions");
       return;
     }
     if (action === "brochures") {
@@ -1898,6 +2577,7 @@ export default function SecurityConsoleGame() {
       setReputation(nextRep);
       persist(residentsRef.current, money, nextRep);
       setOfficeMessage("Подготовлена пачка буклетов. Репутация выросла на 1.");
+      updateDailyChallenge("office_actions");
       return;
     }
     if (action === "study") {
@@ -1911,6 +2591,7 @@ export default function SecurityConsoleGame() {
       setReputation(nextRep);
       persist(residentsRef.current, nextMoney, nextRep);
       setOfficeMessage("Пройден короткий курс переговоров: −600 ₽, репутация +2.");
+      updateDailyChallenge("office_actions");
       return;
     }
     if (action === "restock") {
@@ -1923,6 +2604,7 @@ export default function SecurityConsoleGame() {
       setEquipment((value) => value + 10);
       persist(residentsRef.current, nextMoney, reputation);
       setOfficeMessage("На склад доставлены 10 комплектов датчиков.");
+      updateDailyChallenge("office_actions");
       return;
     }
     if (carUpgradeRef.current >= 3) {
@@ -1940,6 +2622,8 @@ export default function SecurityConsoleGame() {
     setMoney(nextMoney);
     persist(residentsRef.current, nextMoney, reputation);
     setOfficeMessage(`Двигатель улучшен до Stage ${carUpgradeRef.current}. Максимальная скорость и разгон выросли.`);
+    updateDailyChallenge("upgrades");
+    updateDailyChallenge("office_actions");
   };
 
   const signContract = (tariffIndex: number) => {
@@ -1948,8 +2632,14 @@ export default function SecurityConsoleGame() {
     if (!resident) return;
     resident.signed = true;
     const price = TARIFFS[tariffIndex].bonus;
-    const nextMoney = money + 250;
-    const nextRep = reputation + 8;
+    const garageQuestReward = resident.id === 1 && questsRef.current.some((quest) => quest.id === "quest_garage_secrets" && quest.status === "active") ? 2000 : 0;
+    const nextMoney = money + 250 + garageQuestReward;
+    const nextRep = clamp(reputation + 8 + (garageQuestReward ? 5 : 0), 0, 100);
+    residentsRef.current.forEach((neighbor) => {
+      if (!neighbor.signed && neighbor.id !== resident.id && Math.hypot(neighbor.x - resident.x, neighbor.z - resident.z) < 42) {
+        neighbor.interest = clamp(neighbor.interest + 10, 0, 100);
+      }
+    });
     setMoney(nextMoney);
     setReputation(nextRep);
     setResidents([...residentsRef.current]);
@@ -1963,9 +2653,13 @@ export default function SecurityConsoleGame() {
       if (marker) marker.material = mat(0xcce86b);
     }
     persist(residentsRef.current, nextMoney, nextRep);
+    updateDailyChallenge("contracts");
+    updateDailyChallenge("profit", 250 + garageQuestReward);
+    sendNetworkMessage({ type: "contract", residentId: resident.id });
+    sendNetworkMessage({ type: "economy", money: nextMoney, reputation: nextRep });
     unlockAchievement("first_contract");
     if (nextRep >= 50) unlockAchievement("trusted_manager");
-    flash(`Договор «${TARIFFS[tariffIndex].name}» подписан · +250 ₽ · +8 репутации`);
+    flash(garageQuestReward ? "Задание «Гаражные тайны» выполнено · +2 000 ₽ · гаечный ключ" : `Договор «${TARIFFS[tariffIndex].name}» подписан · +250 ₽ · +8 репутации`);
     if (residentsRef.current.filter((r) => r.signed).length === 10) {
       window.setTimeout(() => flash("Все 10 объектов подключены — пульт охраны открыт!"), 2600);
     }
@@ -1973,8 +2667,8 @@ export default function SecurityConsoleGame() {
   };
 
   const startOffice = (demo = false) => {
-    if (!demo && signedCount < 10) {
-      flash(`До открытия пульта нужно ещё ${10 - signedCount} договоров`);
+    if (!demo && (!officeRented || totalContracts < 1)) {
+      flash(officeRented ? "Для дежурства нужен хотя бы один активный договор" : "Сначала арендуйте центральный офис");
       return;
     }
     setOfficeZone("console");
@@ -1983,40 +2677,424 @@ export default function SecurityConsoleGame() {
     setAlarmResult(demo ? "Учебная смена запущена. Сигнал поступит через секунду." : "Смена началась. Все объекты на связи.");
     setAlarm(null);
     window.setTimeout(() => {
-      setAlarm({ type: "Датчик движения", address: "Садовая, 5 · гараж", correct: "call" });
+      const nextAlarm = createAlarmEvent();
+      setAlarm(nextAlarm);
+      sendNetworkMessage({ type: "alarm", alarm: nextAlarm });
     }, 1100);
   };
 
   const handleAlarm = (action: string) => {
     if (!alarm) return;
     statisticsRef.current.alarmsResponded += 1;
-    if (action === alarm.correct) {
-      const nextMoney = money + 450;
-      const nextRep = reputation + 5;
+    updateDailyChallenge("alarms");
+    if (action === "self") {
+      setMapWaypoint({ x: 18, z: 52, label: `Личный выезд · ${alarm.address}` });
+      setAlarmResult("Алексей принял вызов лично. Пульт остался без оператора.");
+      setAlarm(null);
+      setMode("world");
+      flash("Маршрут на тревожный объект построен");
+      return;
+    }
+    const correct = action === alarm.correct || (alarm.scenario === "panic" && action === "gbr") || (alarm.scenario === "intrusion" && action === "police");
+    if (correct) {
+      const reward = alarm.scenario === "panic" ? 1800 : alarm.scenario === "fire" ? 1200 : alarm.scenario === "intrusion" ? 1000 : 450;
+      const repReward = alarm.scenario === "panic" ? 12 : alarm.scenario === "false" ? 4 : 8;
+      const nextMoney = money + reward;
+      const nextRep = clamp(reputation + repReward, 0, 100);
       setMoney(nextMoney);
       setReputation(nextRep);
-      setAlarmResult("Клиент подтвердил: во дворе рабочие. Ложная тревога снята · +450 ₽");
-      flash("Правильное решение · репутация +5");
-      statisticsRef.current.falseAlarms += 1;
+      setAlarmResult(alarm.scenario === "false" ? "Клиент подтвердил ложную тревогу. Сигнал снят без выезда." : alarm.scenario === "fire" ? "Пожарные вызваны, клиент предупреждён. Объект спасён." : alarm.scenario === "panic" ? "ГБР и полиция приняли вызов высшего приоритета." : "Экипаж направлен, полиция предупреждена. Проникновение остановлено.");
+      flash(`Правильное решение · +${reward.toLocaleString("ru-RU")} ₽ · репутация +${repReward}`);
+      if (alarm.scenario === "false") statisticsRef.current.falseAlarms += 1;
       statisticsRef.current.successfulPreventions += 1;
       unlockAchievement("night_owl");
       persist(residentsRef.current, nextMoney, nextRep);
     } else {
-      setMoney((v) => Math.max(0, v - 300));
-      setAlarmResult("Лишний выезд. Штраф за ложное реагирование · −300 ₽");
-      flash("Решение оказалось слишком дорогим");
+      const seriousReset = action === "reset" && alarm.scenario !== "false";
+      const penalty = seriousReset ? 2500 : alarm.scenario === "false" && action === "gbr" ? 500 : 700;
+      const nextMoney = Math.max(0, money - penalty);
+      const nextRep = Math.max(0, reputation - (seriousReset ? 15 : 4));
+      setMoney(nextMoney);
+      setReputation(nextRep);
+      setAlarmResult(seriousReset ? "Реальная угроза ошибочно сброшена. Клиент требует разбирательства." : "Решение не соответствует признакам сигнала.");
+      flash(`Ошибка реагирования · −${penalty.toLocaleString("ru-RU")} ₽`);
+      persist(residentsRef.current, nextMoney, nextRep);
     }
     setStatistics({ ...statisticsRef.current });
     setAlarm(null);
     window.setTimeout(() => {
-      setAlarm({ type: "Пожарный датчик", address: "Новая, 12 · кухня", correct: "fire" });
+      const nextAlarm = createAlarmEvent();
+      setAlarm(nextAlarm);
+      sendNetworkMessage({ type: "alarm", alarm: nextAlarm });
     }, 5200);
   };
 
+  const toggleQuestTracking = (questId: string) => {
+    const currentQuest = questsRef.current.find((quest) => quest.id === questId);
+    if (!currentQuest) return;
+    const trackedCount = questsRef.current.filter((quest) => quest.tracked && quest.status === "active").length;
+    if (!currentQuest.tracked && trackedCount >= 3) {
+      flash("Одновременно можно отслеживать не более трёх заданий");
+      return;
+    }
+    const next = questsRef.current.map((quest) => quest.id === questId ? { ...quest, tracked: !quest.tracked, read: true } : quest);
+    questsRef.current = next;
+    setQuests(next);
+    persistRef.current();
+  };
+
+  const acceptQuest = (questId: string) => {
+    if (questsRef.current.some((quest) => quest.id === questId)) return;
+    const next = [...questsRef.current, { id: questId, status: "active" as QuestStatus, tracked: questsRef.current.filter((quest) => quest.tracked).length < 3, read: false }];
+    questsRef.current = next;
+    setQuests(next);
+    persistRef.current();
+    const definition = QUESTS.find((quest) => quest.id === questId);
+    flash(`Новое задание: ${definition?.title ?? "поручение"}`);
+  };
+
+  const toggleDailyTracking = (challengeId: string) => {
+    const challenge = dailyChallengesRef.current.activeChallenges.find((item) => item.id === challengeId);
+    if (!challenge) return;
+    const trackedCount = dailyChallengesRef.current.activeChallenges.filter((item) => item.tracked).length;
+    if (!challenge.tracked && trackedCount >= 2) {
+      flash("На HUD можно закрепить только два ежедневных испытания");
+      return;
+    }
+    const next = {
+      ...dailyChallengesRef.current,
+      activeChallenges: dailyChallengesRef.current.activeChallenges.map((item) => item.id === challengeId ? { ...item, tracked: !item.tracked } : item),
+    };
+    dailyChallengesRef.current = next;
+    setDailyChallenges(next);
+    persistRef.current();
+  };
+
+  const claimDailyChallenge = (challengeId: string) => {
+    const challenge = dailyChallengesRef.current.activeChallenges.find((item) => item.id === challengeId);
+    const definition = DAILY_CHALLENGES.find((item) => item.id === challengeId);
+    if (!challenge || !definition || challenge.claimed || challenge.progress < definition.target) return;
+    const wasFirstClaim = !dailyChallengesRef.current.activeChallenges.some((item) => item.claimed);
+    const claimedChallenges = dailyChallengesRef.current.activeChallenges.map((item) => item.id === challengeId ? { ...item, claimed: true, tracked: false } : item);
+    const claimedCount = claimedChallenges.filter((item) => item.claimed).length;
+    const bonusEarned = claimedCount >= 3 && !dailyChallengesRef.current.bonusClaimed;
+    const nextStreak = wasFirstClaim ? dailyChallengesRef.current.streakCount + 1 : dailyChallengesRef.current.streakCount;
+    const nextDaily = {
+      ...dailyChallengesRef.current,
+      streakCount: nextStreak,
+      bonusClaimed: dailyChallengesRef.current.bonusClaimed || bonusEarned,
+      activeChallenges: claimedChallenges,
+    };
+    dailyChallengesRef.current = nextDaily;
+    setDailyChallenges(nextDaily);
+    const nextMoney = money + definition.money + (bonusEarned ? 1000 : 0);
+    const nextRep = clamp(reputation + definition.reputation + (bonusEarned ? 50 : 0), 0, 100);
+    setMoney(nextMoney);
+    setReputation(nextRep);
+    persist(residentsRef.current, nextMoney, nextRep);
+    const streakReward = nextStreak === 3 ? " · кружка «Лучший менеджер»" : nextStreak === 7 ? " · наклейки «Пламя»" : nextStreak === 14 ? " · костюм «Ветеран»" : nextStreak === 30 ? " · золотой значок и +5% дохода" : "";
+    flash(`${definition.title}: награда получена${bonusEarned ? " · ежедневная премия +1 000 ₽" : ""}${streakReward}`);
+  };
+
+  const showQuestOnMap = (questId: string) => {
+    const definition = QUESTS.find((quest) => quest.id === questId);
+    if (!definition) return;
+    setMapWaypoint(definition.target);
+    setSelectedMapObject(`Задание: ${definition.title} · ${definition.short}`);
+    setMode("map");
+  };
+
+  const rentCentralOffice = () => {
+    if (signedCount < 10) {
+      flash(`Для аренды офиса нужно ещё ${10 - signedCount} договоров`);
+      return;
+    }
+    officeRentedRef.current = true;
+    setOfficeRented(true);
+    const nextMoney = money + 5000;
+    const nextRep = clamp(reputation + 20, 0, 100);
+    setMoney(nextMoney);
+    setReputation(nextRep);
+    persist(residentsRef.current, nextMoney, nextRep);
+    updateDailyChallenge("profit", 5000);
+    flash("Центральный офис открыт · награда за квест +5 000 ₽ и +20 репутации");
+  };
+
+  const signExtendedContract = (object: SecurityObject, premium = false) => {
+    const district = DISTRICTS.find((item) => item.id === object.district);
+    if (!district || extendedContractsRef.current.includes(object.id)) return;
+    if (reputation < district.reputation || (district.id !== "central" && totalContracts < district.contracts)) {
+      flash(`Район пока закрыт: нужно ${district.reputation} репутации`);
+      return;
+    }
+    if (object.district !== "central" && !openedBranchesRef.current.includes(object.district)) {
+      flash("Сначала откройте филиал в этом районе");
+      return;
+    }
+    const nextContracts = [...extendedContractsRef.current, object.id];
+    const nextMoney = money + object.installation[premium ? 1 : 0];
+    const nextRep = clamp(reputation + (object.commercial ? 4 : 2), 0, 100);
+    extendedContractsRef.current = nextContracts;
+    setExtendedContracts(nextContracts);
+    setMoney(nextMoney);
+    setReputation(nextRep);
+    statisticsRef.current.totalContracts = signedCount + nextContracts.length;
+    setStatistics({ ...statisticsRef.current });
+    persist(residentsRef.current, nextMoney, nextRep);
+    updateDailyChallenge("contracts");
+    updateDailyChallenge("profit", object.installation[premium ? 1 : 0]);
+    sendNetworkMessage({ type: "extended-contract", objectId: object.id });
+    sendNetworkMessage({ type: "economy", money: nextMoney, reputation: nextRep });
+    flash(`${object.name}: договор подписан · монтаж оплачен`);
+  };
+
+  const openBranch = (district: DistrictSpec) => {
+    if (openedBranchesRef.current.includes(district.id)) return;
+    if (reputation < district.reputation || totalContracts < district.contracts || money < district.openingCost) {
+      flash(`Нужно: ${district.reputation} репутации, ${district.contracts} договоров и ${district.openingCost.toLocaleString("ru-RU")} ₽`);
+      return;
+    }
+    const next = [...openedBranchesRef.current, district.id];
+    const nextMoney = money - district.openingCost;
+    openedBranchesRef.current = next;
+    setOpenedBranches(next);
+    setMoney(nextMoney);
+    persist(residentsRef.current, nextMoney, reputation);
+    updateDailyChallenge("upgrades");
+    flash(`Филиал «${district.name}» открыт`);
+  };
+
+  const hireStaff = (role: typeof STAFF_ROLES[number]) => {
+    const activeOffices = openedBranchesRef.current.filter((id) => id !== "central").length + (officeRentedRef.current ? 1 : 0);
+    const limit = role.key === "technicians" ? 2 : role.key === "dispatchers" || role.key === "gbrCrews" || role.key === "salesManagers" ? Math.max(1, activeOffices) : Math.max(1, activeOffices * 2);
+    if (staffRef.current[role.key] >= limit) {
+      flash(`Лимит для текущей сети: ${limit}. Откройте следующий филиал.`);
+      return;
+    }
+    const next = { ...staffRef.current, [role.key]: staffRef.current[role.key] + 1 };
+    staffRef.current = next;
+    setStaff(next);
+    persistRef.current();
+    flash(`${role.name} принят в штат · ${role.salary.toLocaleString("ru-RU")} ₽/мес.`);
+  };
+
+  const buyVehicle = (vehicle: VehicleSpec, used = false) => {
+    if (ownedVehiclesRef.current.includes(vehicle.id)) {
+      currentVehicleRef.current = vehicle.id;
+      setCurrentVehicle(vehicle.id);
+      flash(`${vehicle.name} выбран`);
+      return;
+    }
+    const price = used ? vehicle.usedPrice : vehicle.price;
+    if (money < price) {
+      flash(`Не хватает ${(price - money).toLocaleString("ru-RU")} ₽`);
+      return;
+    }
+    const nextOwned = [...ownedVehiclesRef.current, vehicle.id];
+    const nextMoney = money - price;
+    ownedVehiclesRef.current = nextOwned;
+    currentVehicleRef.current = vehicle.id;
+    setOwnedVehicles(nextOwned);
+    setCurrentVehicle(vehicle.id);
+    setMoney(nextMoney);
+    if (used) engineRef.current.wear = 30 + ((vehicle.price / 1000) % 21);
+    persist(residentsRef.current, nextMoney, reputation);
+    updateDailyChallenge("upgrades");
+    flash(`${vehicle.name} куплен${used ? " с пробегом" : ""}`);
+  };
+
+  const tradeInCurrentVehicle = () => {
+    if (ownedVehiclesRef.current.length <= 1) {
+      flash("Нельзя продать единственный автомобиль");
+      return;
+    }
+    const vehicle = VEHICLE_BY_ID[currentVehicleRef.current];
+    const wearFactor = clamp(1 - engineRef.current.wear / 100, 0.35, 1);
+    const upgradeFactor = 1 + carUpgradeRef.current * 0.05;
+    const value = Math.round(vehicle.price * 0.6 * wearFactor * upgradeFactor);
+    const nextOwned = ownedVehiclesRef.current.filter((id) => id !== vehicle.id);
+    const nextVehicle = nextOwned[0];
+    const nextMoney = money + value;
+    ownedVehiclesRef.current = nextOwned;
+    currentVehicleRef.current = nextVehicle;
+    setOwnedVehicles(nextOwned);
+    setCurrentVehicle(nextVehicle);
+    setMoney(nextMoney);
+    engineRef.current.wear = 0;
+    persist(residentsRef.current, nextMoney, reputation);
+    flash(`${vehicle.name} принят по trade‑in · +${value.toLocaleString("ru-RU")} ₽`);
+  };
+
+  const serviceVehicle = (action: "fuel" | "wash" | "repair" | "tires" | "siren") => {
+    const prices = {
+      fuel: Math.max(0, Math.round((100 - engineRef.current.fuel) / 100 * 40 * 50)),
+      wash: 200,
+      repair: Math.max(500, Math.round(engineRef.current.wear / 100 * 15000)),
+      tires: 2000,
+      siren: 8000,
+    };
+    const price = prices[action];
+    if (action === "siren" && vehicleSirenRef.current) return flash("Мигалка и сирена уже установлены");
+    if (action === "tires" && seasonalTiresRef.current) return flash("Сезонные шины уже установлены");
+    if (money < price) return flash(`Для обслуживания нужно ${price.toLocaleString("ru-RU")} ₽`);
+    const nextMoney = money - price;
+    setMoney(nextMoney);
+    if (action === "fuel") {
+      engineRef.current.fuel = 100;
+      setCarTelemetry((value) => ({ ...value, fuel: 100 }));
+      updateDailyChallenge("upgrades");
+    }
+    if (action === "wash") {
+      carCleanRef.current = true;
+      setCarClean(true);
+    }
+    if (action === "repair") {
+      engineRef.current.wear = 0;
+      setCarTelemetry((value) => ({ ...value, wear: 0 }));
+      updateDailyChallenge("upgrades");
+    }
+    if (action === "tires") {
+      seasonalTiresRef.current = true;
+      setSeasonalTires(true);
+    }
+    if (action === "siren") {
+      vehicleSirenRef.current = true;
+      setVehicleSiren(true);
+    }
+    persist(residentsRef.current, nextMoney, reputation);
+    flash(`${action === "fuel" ? "Бак заправлен" : action === "wash" ? "Машина вымыта" : action === "repair" ? "Автомобиль отремонтирован" : action === "tires" ? "Шины заменены" : "Мигалка и сирена установлены"} · −${price.toLocaleString("ru-RU")} ₽`);
+  };
+
+  const buyStoreItem = (kind: "batteries" | "food" | "tools" | "book" | "leaflets" | "billboard" | "radio") => {
+    const prices = { batteries: 1000, food: 100, tools: 3000, book: 2000, leaflets: 500, billboard: 10000, radio: 3000 };
+    const price = prices[kind];
+    if (money < price) return flash(`Не хватает ${(price - money).toLocaleString("ru-RU")} ₽`);
+    const nextMoney = money - price;
+    let nextRep = reputation;
+    if (kind === "batteries") setEquipment((value) => value + 10);
+    if (kind === "tools") setEquipment((value) => value + 5);
+    if (kind === "food") {
+      energyRef.current = clamp(energyRef.current + 20, 0, 100);
+      setEnergy(Math.round(energyRef.current));
+    }
+    if (kind === "book") nextRep = clamp(nextRep + 2, 0, 100);
+    if (kind === "leaflets") nextRep = clamp(nextRep + 1, 0, 100);
+    if (kind === "billboard") nextRep = clamp(nextRep + 8, 0, 100);
+    if (kind === "radio") nextRep = clamp(nextRep + 4, 0, 100);
+    setMoney(nextMoney);
+    setReputation(nextRep);
+    persist(residentsRef.current, nextMoney, nextRep);
+    updateDailyChallenge("office_actions");
+    flash(`Покупка оформлена · −${price.toLocaleString("ru-RU")} ₽`);
+  };
+
+  const closeBusinessMonth = () => {
+    const interest = loanRef.current ? Math.round(loanRef.current.principal * 0.1) : 0;
+    const result = monthlyIncome - monthlyExpenses - interest;
+    const nextMoney = money + result;
+    const nextMonth = businessMonthRef.current + 1;
+    setMoney(nextMoney);
+    setBusinessMonth(nextMonth);
+    businessMonthRef.current = nextMonth;
+    if (officeRentedRef.current && !questsRef.current.some((quest) => quest.id === "quest_competitor")) {
+      const nextQuests = [...questsRef.current, { id: "quest_competitor", status: "active" as QuestStatus, tracked: false, read: false }];
+      questsRef.current = nextQuests;
+      setQuests(nextQuests);
+      window.setTimeout(() => flash("Новое сюжетное задание: «Конкурент»"), 500);
+    }
+    if (loanRef.current) {
+      loanRef.current = { principal: loanRef.current.principal + interest, months: loanRef.current.months + 1 };
+      setLoan(loanRef.current);
+    }
+    const passiveSales = Math.min(2, staffRef.current.salesManagers);
+    if (passiveSales > 0) {
+      const leads = SECURITY_OBJECTS.filter((object) => openedBranchesRef.current.includes(object.district) && !extendedContractsRef.current.includes(object.id)).slice(0, passiveSales);
+      if (leads.length) {
+        extendedContractsRef.current = [...extendedContractsRef.current, ...leads.map((lead) => lead.id)];
+        setExtendedContracts(extendedContractsRef.current);
+        statisticsRef.current.totalContracts = signedCount + extendedContractsRef.current.length;
+        setStatistics({ ...statisticsRef.current });
+        window.setTimeout(() => flash(`Менеджер продаж привёл ${leads.length} новых клиентов`), 700);
+      }
+    }
+    persist(residentsRef.current, nextMoney, reputation);
+    if (result > 0) updateDailyChallenge("profit", result);
+    sendNetworkMessage({ type: "economy", money: nextMoney, reputation });
+    flash(`Месяц закрыт: ${result >= 0 ? "+" : ""}${result.toLocaleString("ru-RU")} ₽`);
+  };
+
+  const takeLoan = (amount: number) => {
+    if (loanRef.current) {
+      flash("Сначала погасите действующий кредит");
+      return;
+    }
+    const nextLoan = { principal: amount, months: 0 };
+    loanRef.current = nextLoan;
+    setLoan(nextLoan);
+    const nextMoney = money + amount;
+    setMoney(nextMoney);
+    persist(residentsRef.current, nextMoney, reputation);
+    flash(`Банк выдал ${amount.toLocaleString("ru-RU")} ₽ под 10% в месяц`);
+  };
+
+  const createNetworkRoom = () => {
+    const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+    setNetworkIsHost(true);
+    setNetworkRoomCode(code);
+    setNetworkRoomInput(code);
+    flash(`Комната ${code} создана`);
+  };
+
+  const joinNetworkRoom = () => {
+    const code = networkRoomInput.trim().toUpperCase();
+    if (code.length < 4) {
+      flash("Введите код комнаты");
+      return;
+    }
+    setNetworkIsHost(false);
+    setNetworkRoomCode(code);
+    flash(`Подключение к комнате ${code}`);
+  };
+
+  const leaveNetworkRoom = () => {
+    sendNetworkMessage({ type: "leave" });
+    setNetworkRoomCode("");
+    setNetworkPlayers([]);
+    setNetworkChat([]);
+    setNetworkIsHost(false);
+    setMode("intro");
+  };
+
+  const startNetworkGame = () => {
+    if (!networkIsHost) return;
+    sendNetworkMessage({ type: "start" });
+    setMode("world");
+  };
+
+  const sendNetworkChat = () => {
+    const text = networkChatInput.trim().slice(0, 120);
+    if (!text) return;
+    const chat: NetworkChatMessage = { id: `chat-${Date.now()}`, author: profile.nickname, text, sentAt: new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) };
+    setNetworkChat((current) => [...current.slice(-29), chat]);
+    sendNetworkMessage({ type: "chat", chat });
+    setNetworkChatInput("");
+  };
+
   const resetSave = () => {
+    if (!window.confirm("Начать заново? Деньги, договоры, районы, машины, задания и статистика будут сброшены. Профиль и приватность сохранятся.")) return;
     localStorage.removeItem(LEGACY_SAVE_KEY);
-    localStorage.removeItem(ACTIVE_SAVE_KEY);
     (["auto", "slot1", "slot2", "slot3"] as SaveSlotId[]).forEach((slot) => localStorage.removeItem(`${SAVE_SLOT_PREFIX}${slot}`));
+    const cleanStart = migrateSave({
+      ...DEFAULT_SAVE,
+      money: 15000,
+      reputation: 0,
+      contracts: [],
+      interests: Object.fromEntries(RESIDENT_SEED.map((resident) => [resident.id, 0])),
+      profile: profileRef.current,
+      statistics: { ...EMPTY_STATS },
+      dailyChallenges: createDailyChallenges(undefined, false),
+    });
+    localStorage.setItem(ACTIVE_SAVE_KEY, JSON.stringify(cleanStart));
     window.location.reload();
   };
 
@@ -2025,12 +3103,7 @@ export default function SecurityConsoleGame() {
     const minute = Math.floor((gameTime - hour) * 60);
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   }, [gameTime]);
-  const mapCenterX =
-    playerPos.x < 220
-      ? 0
-      : playerPos.x > 3780
-        ? 4000
-        : Math.round(playerPos.x / 300) * 300;
+  const mapCenterX = playerPos.x;
   const placeWaypointFromMap = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -2060,7 +3133,7 @@ export default function SecurityConsoleGame() {
       )}
       {energy < 20 && mode === "world" && <div className="fatigue-vignette" aria-hidden="true" />}
 
-      {mode !== "intro" && mode !== "office" && (
+      {mode !== "intro" && mode !== "network" && mode !== "office" && (
         <div className="hud" aria-hidden={mode !== "world"}>
           <div className="brand">
             <div className="brand-mark">⌂</div>
@@ -2075,7 +3148,7 @@ export default function SecurityConsoleGame() {
             <div className="glass-chip"><span>Пн · {weather}</span><b>{timeLabel}</b></div>
             <div className="glass-chip"><span>Репутация</span><b>★ {reputation}</b></div>
             <div className="glass-chip"><span>Баланс</span><b>{money.toLocaleString("ru-RU")} ₽</b></div>
-            <div className="glass-chip"><span>Договоры</span><b>{signedCount} / 10</b></div>
+            <div className="glass-chip"><span>Договоры</span><b>{totalContracts}</b></div>
           </div>
           <div className="energy-card">
             <div className="energy-label"><span>Энергия менеджера</span><b>{energy}%</b></div>
@@ -2101,30 +3174,59 @@ export default function SecurityConsoleGame() {
           </div>
           <div className="route-card">
             <b>{locationName}</b>
-            <span>{locationName === "Первореченское" ? `До станицы Динской: ${distanceToDinskaya.toFixed(1)} км` : "Маршрут Первореченское — 4 км"}</span>
+            <span>Трасса: село Первореченское — станица Динская</span>
           </div>
+          <div className="quest-hud">
+            {quests.filter((quest) => quest.tracked && quest.status === "active").slice(0, 3).map((progress) => {
+              const definition = QUESTS.find((quest) => quest.id === progress.id);
+              if (!definition) return null;
+              const value = progress.id === "quest_open_office" ? signedCount : progress.id === "quest_daily_sales" ? Math.min(totalContracts, 2) : progress.id === "quest_false_alarm_wave" ? Math.min(statistics.alarmsResponded, 3) : residents[0]?.signed ? 1 : 0;
+              const target = progress.id === "quest_open_office" ? 10 : progress.id === "quest_daily_sales" ? 2 : progress.id === "quest_false_alarm_wave" ? 3 : 1;
+              return <div key={progress.id}><b>📋 {definition.title}</b><span>• {definition.short} · {value}/{target}</span></div>;
+            })}
+          </div>
+          <div className="daily-hud">
+            {dailyChallenges.activeChallenges.filter((challenge) => challenge.tracked && !challenge.claimed).slice(0, 2).map((challenge) => {
+              const definition = DAILY_CHALLENGES.find((item) => item.id === challenge.id);
+              if (!definition) return null;
+              return <div key={challenge.id}><i>{definition.icon}</i><span><b>{definition.title}</b><small>{challenge.progress.toFixed(definition.metric === "drive_km" ? 1 : 0)} / {definition.target}</small></span></div>;
+            })}
+          </div>
+          {networkRoomCode && <div className="coop-hud"><b>CO-OP · {networkRoomCode}</b>{networkPlayers.map((player) => <span key={player.id}><i />{player.name} · {player.role}</span>)}</div>}
           <div className="minimap" aria-label="Миникарта">
             <span className="compass-n">С</span>
-            {Math.abs(mapCenterX) < 240 && <div className="map-river" />}
+            <div className="minimap-layer" style={{ transform: minimapRotates ? `rotate(${-engineRef.current.yaw}rad)` : "none" }}>
             <div className="map-road" />
-            {(Math.abs(mapCenterX) < 240 || Math.abs(mapCenterX - 4000) < 240) && <div className="map-road vertical" />}
-            {Math.abs(mapCenterX) < 240 && residents.map((r) => (
-              <span key={`h-${r.id}`} className={`map-home ${r.signed ? "signed" : ""}`} style={{ left: mapPos(r.x - mapCenterX, 180), top: mapPos(-r.z, 190) }} />
+            {residents.filter((r) => Math.hypot(r.x - playerPos.x, r.z - playerPos.z) <= 80).map((r) => (
+              <span key={`h-${r.id}`} className={`map-home ${r.signed ? "signed" : ""}`} style={{ left: mapPos(r.x - mapCenterX, 80), top: mapPos(playerPos.z - r.z, 80) }} />
             ))}
-            {Math.abs(mapCenterX) < 240 && residents.filter((r) => !r.signed).map((r) => (
-              <span key={`n-${r.id}`} className="map-npc" style={{ left: mapPos(r.x + 5 - mapCenterX, 180), top: mapPos(-(r.z + (r.z > 0 ? -5 : 5)), 190) }} />
+            {residents.filter((r) => !r.signed && Math.hypot(r.x - playerPos.x, r.z - playerPos.z) <= 80).map((r) => (
+              <span key={`n-${r.id}`} className="map-npc" style={{ left: mapPos(r.x + 5 - mapCenterX, 80), top: mapPos(playerPos.z - r.z, 80) }} />
             ))}
-            {WORLD_KEY_POINTS.filter((point) => Math.abs(point.x - mapCenterX) < 180).map((point) => (
+            {WORLD_KEY_POINTS.filter((point) => Math.hypot(point.x - playerPos.x, point.z - playerPos.z) <= 80).map((point) => (
               <span
                 key={`key-${point.id}`}
                 className={`map-key map-key-${point.kind}`}
                 title={point.label}
-                style={{ left: mapPos(point.x - mapCenterX, 180), top: mapPos(-point.z, 190) }}
+                style={{ left: mapPos(point.x - mapCenterX, 80), top: mapPos(playerPos.z - point.z, 80) }}
               >
                 {point.short}
               </span>
             ))}
-            <span className="map-player" style={{ left: mapPos(playerPos.x - mapCenterX, 180), top: mapPos(-playerPos.z, 190) }} />
+            {quests.filter((quest) => quest.tracked && quest.status === "active").map((progress) => {
+              const definition = QUESTS.find((quest) => quest.id === progress.id);
+              if (!definition || Math.hypot(definition.target.x - playerPos.x, definition.target.z - playerPos.z) > 80) return null;
+              return <span key={`quest-mini-${progress.id}`} className={`map-quest map-quest-${definition.category}`} style={{ left: mapPos(definition.target.x - playerPos.x, 80), top: mapPos(playerPos.z - definition.target.z, 80) }}>!</span>;
+            })}
+            {networkPlayers.filter((player) => player.id !== profile.id && Math.hypot(player.x - playerPos.x, player.z - playerPos.z) <= 80).map((player) => <span key={`coop-mini-${player.id}`} className="map-coop-player" title={player.name} style={{ left: mapPos(player.x - playerPos.x, 80), top: mapPos(playerPos.z - player.z, 80) }}>{player.name.slice(0, 1)}</span>)}
+            </div>
+            {quests.filter((quest) => quest.tracked && quest.status === "active").map((progress) => {
+              const definition = QUESTS.find((quest) => quest.id === progress.id);
+              if (!definition || Math.hypot(definition.target.x - playerPos.x, definition.target.z - playerPos.z) <= 80) return null;
+              const angle = Math.atan2(playerPos.z - definition.target.z, definition.target.x - playerPos.x) - (minimapRotates ? engineRef.current.yaw : 0);
+              return <span key={`quest-edge-${progress.id}`} className={`map-quest-edge map-quest-${definition.category}`} title={definition.title} style={{ left: `${50 + Math.cos(angle) * 42}%`, top: `${50 + Math.sin(angle) * 42}%`, transform: `translate(-50%, -50%) rotate(${angle + Math.PI / 2}rad)` }}>▲</span>;
+            })}
+            <span className="map-player" style={{ left: "50%", top: "50%", transform: `translate(-50%, -50%) rotate(${minimapRotates ? 0 : engineRef.current.yaw}rad)` }} />
           </div>
           {mode === "world" && (nearest || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
@@ -2133,7 +3235,7 @@ export default function SecurityConsoleGame() {
             </div>
           )}
           {mode === "world" && !driving && nearCar && !nearest && (
-            <div className="interaction-prompt"><span className="key">E</span><span>Сесть в старый седан</span></div>
+            <div className="interaction-prompt"><span className="key">E</span><span>Сесть в {VEHICLE_BY_ID[currentVehicle].name.toLowerCase()}</span></div>
           )}
         </div>
       )}
@@ -2147,6 +3249,7 @@ export default function SecurityConsoleGame() {
             <div className="intro-actions">
               <button className="primary-btn" onClick={() => setMode("world")}>Выйти в посёлок →</button>
               <button className="soft-btn" onClick={() => startOffice(true)}>Демо пульта</button>
+              <button className="soft-btn" onClick={() => setMode("network")}>Сетевая игра · до 4 игроков</button>
             </div>
           </div>
           <aside className="intro-card">
@@ -2158,6 +3261,46 @@ export default function SecurityConsoleGame() {
               <div className="mission-step"><i>3</i><span>Подключите 10 объектов и откройте пульт</span></div>
             </div>
           </aside>
+        </section>
+      )}
+
+      {mode === "network" && (
+        <section className="overlay network-overlay">
+          <div className="network-shell">
+            <header>
+              <div><small>Кооперативный режим</small><h1>Общее охранное предприятие</h1><p>Работайте вместе: один игрок ведёт переговоры, другой дежурит за пультом, третий выезжает на тревогу.</p></div>
+              <button onClick={leaveNetworkRoom}>← Главное меню</button>
+            </header>
+            {!networkRoomCode ? <div className="network-setup">
+              <article>
+                <i>＋</i><h2>Создать игру</h2>
+                <label>Регион<select value={networkRegion} onChange={(event) => setNetworkRegion(event.target.value)}><option>Europe</option><option>Asia</option><option>US East</option></select></label>
+                <label>Игроков<select value={networkMaxPlayers} onChange={(event) => setNetworkMaxPlayers(Number(event.target.value))}><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option></select></label>
+                <label>Видимость<select value={networkVisibility} onChange={(event) => setNetworkVisibility(event.target.value as "open" | "friends")}><option value="open">Открытая</option><option value="friends">Только друзья</option></select></label>
+                <button className="primary-btn" onClick={createNetworkRoom}>Создать комнату</button>
+              </article>
+              <article>
+                <i>→</i><h2>Присоединиться</h2><p>Введите шестизначный код комнаты от создателя игры.</p>
+                <input value={networkRoomInput} maxLength={8} placeholder="КОД КОМНАТЫ" onChange={(event) => setNetworkRoomInput(event.target.value.toUpperCase())} onKeyDown={(event) => { if (event.key === "Enter") joinNetworkRoom(); }} />
+                <button className="primary-btn" onClick={joinNetworkRoom}>Подключиться</button>
+              </article>
+            </div> : <div className="network-lobby">
+              <div className="network-room-panel">
+                <div className="room-code"><small>Код комнаты</small><b>{networkRoomCode}</b><span>{networkRegion} · {networkVisibility === "open" ? "открытая" : "для друзей"} · до {networkMaxPlayers} игроков</span></div>
+                <h2>Команда</h2>
+                <div className="network-player-grid">
+                  {networkPlayers.map((player) => <article key={player.id}><div className={`profile-avatar-large ${player.avatar}`}>{player.name.slice(0, 1).toUpperCase()}</div><span><b>{player.name}{player.host ? " · хозяин" : ""}</b><small>{player.role}</small></span><i>●</i></article>)}
+                  {Array.from({ length: Math.max(0, networkMaxPlayers - networkPlayers.length) }).map((_, index) => <article className="empty" key={`empty-${index}`}><div>＋</div><span><b>Свободное место</b><small>Ожидание игрока</small></span></article>)}
+                </div>
+                <div className="network-lobby-actions">{networkIsHost ? <button className="primary-btn" onClick={startNetworkGame}>Начать совместную игру</button> : <span>Ожидаем запуска от хозяина комнаты…</span>}<button className="soft-btn" onClick={leaveNetworkRoom}>Покинуть комнату</button></div>
+                <small className="network-note">В статической WebGL-версии работает кооператив между вкладками одного браузера через BroadcastChannel. Сетевой транспорт Photon/WebSocket можно подключить без изменения игрового интерфейса.</small>
+              </div>
+              <aside className="network-chat">
+                <h3>Чат команды</h3><div>{networkChat.length ? networkChat.map((message) => <p key={message.id}><small>{message.sentAt}</small><b>{message.author}</b><span>{message.text}</span></p>) : <em>Напишите первое сообщение команде.</em>}</div>
+                <form onSubmit={(event) => { event.preventDefault(); sendNetworkChat(); }}><input value={networkChatInput} placeholder="Сообщение…" onChange={(event) => setNetworkChatInput(event.target.value)} /><button>Отправить</button></form>
+              </aside>
+            </div>}
+          </div>
         </section>
       )}
 
@@ -2181,6 +3324,11 @@ export default function SecurityConsoleGame() {
                 </button>
               ))}
             </div>
+            {activeNpc.id === 1 && activeNpc.interest >= 50 && !quests.some((quest) => quest.id === "quest_garage_secrets") && <div className="quest-offer">
+              <span>!</span><div><small>У меня к тебе дело…</small><b>Гаражные тайны</b><p>Помогите Семёну установить датчик и найти старую коробку с инструментами.</p></div>
+              <button onClick={() => acceptQuest("quest_garage_secrets")}>Принять</button>
+              <button onClick={() => flash("Семён подождёт. К поручению можно вернуться позже.")}>Отказаться</button>
+            </div>}
             <div className="dialogue-footer">
               <span>Esc — закончить разговор</span>
               <button className="sign-btn" disabled={activeNpc.interest < 70} onClick={() => setShowTariff(true)}>
@@ -2215,8 +3363,13 @@ export default function SecurityConsoleGame() {
             <aside className="tablet-sidebar">
               <h2>Мой пульт</h2>
               <button className={`tablet-tab ${tabletTab === "hero" ? "active" : ""}`} onClick={() => setTabletTab("hero")}>Алексей и навыки</button>
+              <button className={`tablet-tab ${tabletTab === "quests" ? "active" : ""}`} onClick={() => setTabletTab("quests")}>Задания {quests.some((quest) => !quest.read) ? "●" : ""}</button>
               <button className={`tablet-tab ${tabletTab === "wardrobe" ? "active" : ""}`} onClick={() => setTabletTab("wardrobe")}>Гардероб</button>
               <button className={`tablet-tab ${tabletTab === "clients" ? "active" : ""}`} onClick={() => setTabletTab("clients")}>Жители и договоры</button>
+              <button className={`tablet-tab ${tabletTab === "contracts" ? "active" : ""}`} onClick={() => setTabletTab("contracts")}>Новые объекты</button>
+              <button className={`tablet-tab ${tabletTab === "development" ? "active" : ""}`} onClick={() => setTabletTab("development")}>Филиалы и штат</button>
+              <button className={`tablet-tab ${tabletTab === "fleet" ? "active" : ""}`} onClick={() => setTabletTab("fleet")}>Автопарк</button>
+              <button className={`tablet-tab ${tabletTab === "shops" ? "active" : ""}`} onClick={() => setTabletTab("shops")}>Магазины и услуги</button>
               <button className={`tablet-tab ${tabletTab === "finance" ? "active" : ""}`} onClick={() => setTabletTab("finance")}>Финансы</button>
               <button className={`tablet-tab ${tabletTab === "profile" ? "active" : ""}`} onClick={() => setTabletTab("profile")}>Профиль и статистика</button>
               <button className={`tablet-tab ${tabletTab === "rating" ? "active" : ""}`} onClick={() => setTabletTab("rating")}>Рейтинг</button>
@@ -2241,6 +3394,87 @@ export default function SecurityConsoleGame() {
                   <span>Дипломат</span><span>Технарь</span><span>Драйвер</span>
                 </div>
                 <p className="hero-story">Алексей вырос в ПервоРеченском, затем работал менеджером в городском ЧОПе. Услышав о кражах в родном посёлке, он вернулся со старой машиной, небольшим капиталом и намерением снова заслужить доверие соседей.</p>
+              </>}
+              {tabletTab === "quests" && <>
+                <div className="quest-mode-tabs">
+                  <button className={questView === "journal" ? "active" : ""} onClick={() => setQuestView("journal")}>Журнал квестов</button>
+                  <button className={questView === "daily" ? "active" : ""} onClick={() => setQuestView("daily")}>Ежедневные испытания · 🔥 {dailyChallenges.streakCount}</button>
+                </div>
+                {questView === "journal" ? <div className="quest-journal">
+                <div className="quest-list-panel">
+                  <div className="quest-journal-head"><small>Журнал Алексея</small><h1>Задания</h1></div>
+                  <div className="quest-filters">
+                    {(["all", "main", "side", "dynamic", "completed"] as const).map((filter) => (
+                      <button key={filter} className={questFilter === filter ? "active" : ""} onClick={() => setQuestFilter(filter)}>
+                        {filter === "all" ? "Все" : filter === "main" ? "Основные" : filter === "side" ? "Побочные" : filter === "dynamic" ? "Динамические" : "Завершённые"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="quest-list">
+                    {quests.filter((progress) => {
+                      const definition = QUESTS.find((quest) => quest.id === progress.id);
+                      if (!definition) return false;
+                      if (questFilter === "completed") return progress.status === "completed";
+                      return questFilter === "all" || definition.category === questFilter;
+                    }).map((progress) => {
+                      const definition = QUESTS.find((quest) => quest.id === progress.id)!;
+                      return <button key={progress.id} className={`${selectedQuestId === progress.id ? "active" : ""} ${progress.status}`} onClick={() => {
+                        setSelectedQuestId(progress.id);
+                        const next = questsRef.current.map((quest) => quest.id === progress.id ? { ...quest, read: true } : quest);
+                        questsRef.current = next;
+                        setQuests(next);
+                      }}>
+                        <i className={`quest-icon ${definition.category}`}>{definition.icon}</i>
+                        <span><b>{definition.title}</b><small>{progress.status === "completed" ? "Выполнено" : definition.short}</small></span>
+                        {!progress.read && <em />}
+                      </button>;
+                    })}
+                  </div>
+                </div>
+                <div className="quest-detail-panel">
+                  <div className={`quest-detail-icon ${selectedQuest.category}`}>{selectedQuest.icon}</div>
+                  <small>{selectedQuest.category === "main" ? "Основное задание" : selectedQuest.category === "side" ? "Побочное задание" : selectedQuest.category === "dynamic" ? "Динамическое событие" : "Ежедневная задача"}</small>
+                  <h1>{selectedQuest.title}</h1>
+                  <p>{selectedQuest.full}</p>
+                  <h3>Цели</h3>
+                  <div className="quest-objectives">
+                    {selectedQuest.id === "quest_open_office" && <>
+                      <div className={signedCount >= 10 ? "done" : ""}><i>{signedCount >= 10 ? "✓" : ""}</i><span>Заключить 10 договоров</span><b>{signedCount}/10</b></div>
+                      <div className={officeRented ? "done" : ""}><i>{officeRented ? "✓" : ""}</i><span>Арендовать центральный офис</span><b>{officeRented ? "1/1" : "0/1"}</b></div>
+                    </>}
+                    {selectedQuest.id === "quest_garage_secrets" && <div className={residents[0]?.signed ? "done" : ""}><i>{residents[0]?.signed ? "✓" : ""}</i><span>Заключить договор с Семёном и проверить гараж</span><b>{residents[0]?.signed ? "1/1" : "0/1"}</b></div>}
+                    {selectedQuest.id === "quest_false_alarm_wave" && <div className={statistics.alarmsResponded >= 3 ? "done" : ""}><i>{statistics.alarmsResponded >= 3 ? "✓" : ""}</i><span>Правильно обработать три сигнала</span><b>{Math.min(statistics.alarmsResponded, 3)}/3</b></div>}
+                    {selectedQuest.id === "quest_daily_sales" && <div className={totalContracts >= 2 ? "done" : ""}><i>{totalContracts >= 2 ? "✓" : ""}</i><span>Заключить два договора</span><b>{Math.min(totalContracts, 2)}/2</b></div>}
+                    {selectedQuest.id === "quest_competitor" && <div><i /><span>Открыть офис и завершить первый месяц</span><b>{officeRented && businessMonth > 1 ? "1/1" : "0/1"}</b></div>}
+                  </div>
+                  <div className="quest-reward"><small>Награда</small><b>{selectedQuest.reward}</b></div>
+                  <div className="quest-actions">
+                    <button className="primary-btn" onClick={() => toggleQuestTracking(selectedQuest.id)}>
+                      {quests.find((quest) => quest.id === selectedQuest.id)?.tracked ? "Не отслеживать" : "Отслеживать"}
+                    </button>
+                    <button className="soft-btn" onClick={() => showQuestOnMap(selectedQuest.id)}>Показать на карте</button>
+                    {selectedQuest.id === "quest_open_office" && !officeRented && <button className="soft-btn" disabled={signedCount < 10} onClick={rentCentralOffice}>Арендовать офис</button>}
+                  </div>
+                </div>
+              </div> : <div className="daily-challenges-page">
+                <header><div><small>Ежедневник менеджера</small><h1>Четыре дела на сегодня</h1><p>Испытания обновляются по реальному календарю и не накапливаются.</p></div><div className="daily-streak"><b>🔥 Серия: {dailyChallenges.streakCount} дней</b><span>Обновление через {dailyResetLabel}</span></div></header>
+                <div className="daily-bonus-progress"><span>Ежедневная премия: выполнить 3 из 4</span><b>{dailyChallenges.activeChallenges.filter((challenge) => challenge.claimed).length} / 3</b><i><em style={{ width: `${Math.min(100, dailyChallenges.activeChallenges.filter((challenge) => challenge.claimed).length / 3 * 100)}%` }} /></i><small>{dailyChallenges.bonusClaimed ? "Конверт с премией получен: +1 000 ₽ и +50 репутации" : "Награда выдаётся вместе с третьим забранным испытанием"}</small></div>
+                <div className="daily-challenge-grid">
+                  {dailyChallenges.activeChallenges.map((challenge) => {
+                    const definition = DAILY_CHALLENGES.find((item) => item.id === challenge.id)!;
+                    const percent = Math.min(100, challenge.progress / definition.target * 100);
+                    return <article key={challenge.id} className={`${challenge.claimed ? "claimed" : ""} ${percent >= 100 ? "complete" : ""}`}>
+                      <div className={`daily-icon daily-${definition.category}`}>{definition.icon}</div>
+                      <small>{definition.category === "manager" ? "Менеджер" : definition.category === "console" ? "Пульт" : definition.category === "driving" ? "Вождение" : "Общее"}</small>
+                      <h2>{definition.title}</h2><p>{definition.description}</p>
+                      <div className="daily-progress"><span><i style={{ width: `${percent}%` }} /></span><b>{challenge.progress.toFixed(definition.metric === "drive_km" ? 1 : 0)} / {definition.target}</b></div>
+                      <div className="daily-reward"><span>Награда</span><b>{definition.money} ₽ · +{definition.reputation} репутации</b></div>
+                      <div><button className="soft-btn" disabled={challenge.claimed} onClick={() => toggleDailyTracking(challenge.id)}>{challenge.tracked ? "Убрать с HUD" : "Отслеживать"}</button><button className="primary-btn" disabled={challenge.claimed || percent < 100} onClick={() => claimDailyChallenge(challenge.id)}>{challenge.claimed ? "Получено" : "Забрать"}</button></div>
+                    </article>;
+                  })}
+                </div>
+                <div className="streak-roadmap"><h3>Награды за серию</h3>{[{ d: 3, r: "Кружка «Лучший менеджер»" }, { d: 7, r: "Наклейки «Пламя»" }, { d: 14, r: "Костюм «Ветеран»" }, { d: 30, r: "Золотой значок · +5% дохода" }].map((reward) => <div className={dailyChallenges.streakCount >= reward.d ? "done" : ""} key={reward.d}><b>{reward.d} дней</b><span>{reward.r}</span></div>)}</div>
+              </div>}
               </>}
               {tabletTab === "wardrobe" && <>
                 <div className="wardrobe-head">
@@ -2287,7 +3521,7 @@ export default function SecurityConsoleGame() {
               </>}
               {tabletTab === "clients" && <>
                 <h1>Жители посёлка</h1>
-                <p>{signedCount} из 10 объектов подключено к будущему пульту.</p>
+                <p>{totalContracts} объектов под охраной, из них {signedCount} — первые личные договоры Алексея.</p>
                 <div className="client-grid">
                   {residents.map((r) => (
                     <div key={r.id} className="client-card">
@@ -2298,16 +3532,98 @@ export default function SecurityConsoleGame() {
                   ))}
                 </div>
               </>}
+              {tabletTab === "contracts" && <>
+                <div className="section-heading"><div><small>Расширение клиентской базы</small><h1>Новые объекты</h1></div><b>{totalContracts} договоров</b></div>
+                <p>Жилые и коммерческие предложения появляются по мере роста репутации и открытия филиалов.</p>
+                {DISTRICTS.map((district) => {
+                  const unlocked = reputation >= district.reputation && (district.id === "central" || totalContracts >= district.contracts);
+                  return <section className={`district-contracts ${unlocked ? "" : "locked"}`} key={district.id}>
+                    <header style={{ borderColor: district.color }}><div><small>{district.subtitle}</small><h2>{district.name}</h2></div><span>{unlocked ? openedBranches.includes(district.id) || district.id === "central" ? "Доступен" : "Нужен филиал" : `★ ${district.reputation}`}</span></header>
+                    <div className="security-object-grid">
+                      {SECURITY_OBJECTS.filter((object) => object.district === district.id).slice(0, 6).map((object) => {
+                        const signed = extendedContracts.includes(object.id);
+                        return <article key={object.id} className={signed ? "signed" : ""}>
+                          <small>{object.objectType} · {object.address}</small><h3>{object.name}</h3>
+                          <p>Монтаж от {object.installation[0].toLocaleString("ru-RU")} ₽ · абонплата от {object.monthly[0].toLocaleString("ru-RU")} ₽/мес.</p>
+                          <div>
+                            <button disabled={!unlocked || signed} onClick={() => signExtendedContract(object)}>{signed ? "Под охраной" : "Базовый пакет"}</button>
+                            <button disabled={!unlocked || signed} onClick={() => signExtendedContract(object, true)}>Расширенный</button>
+                          </div>
+                        </article>;
+                      })}
+                    </div>
+                  </section>;
+                })}
+              </>}
+              {tabletTab === "development" && <>
+                <div className="section-heading"><div><small>Сеть предприятия</small><h1>Филиалы и штат</h1></div><b>{openedBranches.length} / {DISTRICTS.length}</b></div>
+                <div className="branch-grid">
+                  {DISTRICTS.map((district) => {
+                    const opened = openedBranches.includes(district.id);
+                    return <article key={district.id} className={opened ? "opened" : ""} style={{ borderTopColor: district.color }}>
+                      <small>{district.subtitle}</small><h3>{district.name}</h3>
+                      <p>Требования: ★ {district.reputation} · {district.contracts} договоров</p>
+                      <b>{district.openingCost.toLocaleString("ru-RU")} ₽</b><span>аренда {district.monthlyRent.toLocaleString("ru-RU")} ₽/мес.</span>
+                      <button disabled={opened && (district.id !== "central" || officeRented)} onClick={() => district.id === "central" ? rentCentralOffice() : openBranch(district)}>{opened ? district.id === "central" && !officeRented ? "Арендовать офис" : "Филиал открыт" : "Открыть филиал"}</button>
+                    </article>;
+                  })}
+                </div>
+                <h2>Сотрудники</h2>
+                <div className="staff-grid">
+                  {STAFF_ROLES.map((role) => <article key={role.key}><div><small>{role.description}</small><h3>{role.name}</h3></div><b>{staff[role.key]} чел.</b><span>{role.salary.toLocaleString("ru-RU")} ₽/мес.</span><button onClick={() => hireStaff(role)}>Нанять</button></article>)}
+                </div>
+                <div className="shift-schedule"><div><small>Расписание дежурств</small><h3>Ближайшая смена · 20:00–08:00</h3><p>{officeRented ? `${totalContracts} объектов на связи. Можно автоматически прибыть в офис.` : "Сначала арендуйте центральный офис."}</p></div><button className="primary-btn" disabled={!officeRented || totalContracts < 1} onClick={() => startOffice()}>Начать смену</button></div>
+              </>}
+              {tabletTab === "fleet" && <>
+                <div className="section-heading"><div><small>Автосалон и служебный гараж</small><h1>Автопарк</h1></div><b>{VEHICLE_BY_ID[currentVehicle].name}</b></div>
+                <div className="vehicle-shop-grid">
+                  {VEHICLES.map((vehicle) => {
+                    const owned = ownedVehicles.includes(vehicle.id);
+                    return <article key={vehicle.id} className={`${owned ? "owned" : ""} ${currentVehicle === vehicle.id ? "active" : ""}`}>
+                      <div className={`vehicle-silhouette vehicle-${vehicle.id}`}><i /><span /></div>
+                      <small>{vehicle.className}</small><h3>{vehicle.name}</h3><p>{vehicle.description}</p>
+                      <div className="vehicle-specs"><span>{vehicle.maxSpeed} км/ч</span><span>{vehicle.fuelUse} л/100 км</span><span>{vehicle.capacity} мест</span></div>
+                      <b>{vehicle.price.toLocaleString("ru-RU")} ₽ <small>· б/у {vehicle.usedPrice.toLocaleString("ru-RU")} ₽</small></b>
+                      <div><button onClick={() => buyVehicle(vehicle)}>{owned ? currentVehicle === vehicle.id ? "Выбрано" : "Выбрать" : "Купить новую"}</button>{!owned && <button onClick={() => buyVehicle(vehicle, true)}>Купить б/у</button>}</div>
+                    </article>;
+                  })}
+                </div>
+                <div className="vehicle-service-panel">
+                  <div><small>Активная машина</small><h2>{VEHICLE_BY_ID[currentVehicle].name}</h2><p>Топливо {Math.round(carTelemetry.fuel)}% · износ {Math.round(carTelemetry.wear)}% · {carClean ? "чистая" : "нужна мойка"} · {seasonalTires ? "сезонные шины" : "обычные шины"} · {vehicleSiren ? "мигалка установлена" : "без мигалки"}</p></div>
+                  <div className="service-actions">
+                    <button onClick={() => serviceVehicle("fuel")}>Заправить · 50 ₽/л</button>
+                    <button onClick={() => serviceVehicle("wash")}>Мойка · 200 ₽</button>
+                    <button onClick={() => serviceVehicle("repair")}>Ремонт · до 15 000 ₽</button>
+                    <button onClick={() => serviceVehicle("tires")}>Шины · 2 000 ₽</button>
+                    <button onClick={() => serviceVehicle("siren")}>Мигалка · 8 000 ₽</button>
+                    <button className="danger" disabled={ownedVehicles.length <= 1} onClick={tradeInCurrentVehicle}>Trade‑in текущей</button>
+                  </div>
+                </div>
+              </>}
+              {tabletTab === "shops" && <>
+                <div className="section-heading"><div><small>Инфраструктура районов</small><h1>Магазины и услуги</h1></div><b>{equipment} комплектов на складе</b></div>
+                <div className="player-shop-grid">
+                  <article><i>⌁</i><small>Магазин электроники</small><h2>Датчики и расходники</h2><p>Батарейки для десяти простых датчиков.</p><button onClick={() => buyStoreItem("batteries")}>10 батареек · 1 000 ₽</button></article>
+                  <article><i>⚒</i><small>Инструменты</small><h2>Монтажный набор</h2><p>Запас крепежа и инструментов на пять установок.</p><button onClick={() => buyStoreItem("tools")}>Купить · 3 000 ₽</button></article>
+                  <article><i>☕</i><small>Кафе</small><h2>Обед и кофе</h2><p>Восстанавливает 20 единиц энергии.</p><button onClick={() => buyStoreItem("food")}>Заказать · 100 ₽</button></article>
+                  <article><i>▤</i><small>Книжный магазин</small><h2>Продажи и безопасность</h2><p>Учебная литература повышает репутацию.</p><button onClick={() => buyStoreItem("book")}>Книга · 2 000 ₽</button></article>
+                </div>
+                <h2>Рекламное агентство</h2>
+                <div className="advertising-row"><button onClick={() => buyStoreItem("leaflets")}>Листовки · 500 ₽</button><button onClick={() => buyStoreItem("radio")}>Радио‑ролик · 3 000 ₽</button><button onClick={() => buyStoreItem("billboard")}>Рекламный щит · 10 000 ₽</button></div>
+              </>}
               {tabletTab === "finance" && <>
                 <h1>Финансовый отчёт</h1>
-                <p>Короткая сводка текущего игрового месяца.</p>
+                <p>Игровой месяц №{businessMonth}. Зарплаты, аренда и страховка списываются при закрытии месяца.</p>
                 <div className="finance-row">
                   <div className="finance-box"><span>Баланс</span><b>{money.toLocaleString("ru-RU")} ₽</b></div>
                   <div className="finance-box"><span>Доход / месяц</span><b>{monthlyIncome.toLocaleString("ru-RU")} ₽</b></div>
-                  <div className="finance-box"><span>Репутация</span><b>{reputation} ★</b></div>
+                  <div className="finance-box"><span>Расходы / месяц</span><b>{monthlyExpenses.toLocaleString("ru-RU")} ₽</b></div>
+                  <div className="finance-box"><span>Прогноз</span><b>{(monthlyIncome - monthlyExpenses).toLocaleString("ru-RU")} ₽</b></div>
                 </div>
                 <div className="finance-row">
-                  <button className="primary-btn" onClick={cycleWeather}>Сменить погоду: {weather}</button>
+                  <button className="primary-btn" onClick={closeBusinessMonth}>Закрыть месяц</button>
+                  {!loan ? [10000, 50000, 200000].map((amount) => <button key={amount} className="soft-btn" onClick={() => takeLoan(amount)}>Кредит {amount.toLocaleString("ru-RU")} ₽</button>) : <div className="loan-card"><span>Кредит · 10%/мес.</span><b>{loan.principal.toLocaleString("ru-RU")} ₽</b></div>}
+                  <button className="soft-btn" onClick={cycleWeather}>Сменить погоду: {weather}</button>
                   <button className="soft-btn" style={{ color: "#315c45", borderColor: "#bfc8b8" }} onClick={resetSave}>Начать заново</button>
                 </div>
               </>}
@@ -2376,7 +3692,7 @@ export default function SecurityConsoleGame() {
                     return <article className={`save-card ${saved ? "filled" : ""}`} key={slot}>
                       <small>{slot === "auto" ? "Автосохранение" : `Ручной слот ${slot.slice(-1)}`}</small>
                       <h3>{saved?.saveName ?? "Пустой слот"}</h3>
-                      <p>{saved ? `${new Date(saved.savedAt).toLocaleString("ru-RU")} · ${saved.data.contracts.length} договоров` : "Здесь ещё нет сохранения."}</p>
+                      <p>{saved ? `${new Date(saved.savedAt).toLocaleString("ru-RU")} · ${saved.data.contracts.length + (saved.data.extendedContracts?.length ?? 0)} договоров` : "Здесь ещё нет сохранения."}</p>
                       <div>{slot !== "auto" && <button onClick={() => manualSave(slot)}>Сохранить</button>}{saved && <button onClick={() => loadSlot(slot)}>Загрузить</button>}{saved && slot !== "auto" && <button className="danger" onClick={() => deleteSlot(slot)}>Удалить</button>}</div>
                     </article>;
                   })}
@@ -2407,8 +3723,7 @@ export default function SecurityConsoleGame() {
               <div className="world-map-road dirt first" /><div className="world-map-road dirt second" />
               <div className="world-map-road gravel" /><div className="world-map-road footpath" />
               <div className="world-map-cross first" /><div className="world-map-cross second" /><div className="world-map-river" />
-              <div className="world-village first"><b>Первореченское</b><small>офис · школа · магазин</small></div>
-              <div className="world-village second"><b>станица Динская</b><small>центр · школа · магазин</small></div>
+              {DISTRICTS.map((district) => <div key={district.id} className="world-village" style={{ left: worldMapX(district.x), top: district.id === "industrial" ? "58%" : "34%" }}><b>{district.id === "central" ? "село Первореченское" : district.subtitle}</b><small>{openedBranches.includes(district.id) ? "филиал открыт" : `нужно ★ ${district.reputation}`}</small></div>)}
               {mapLayers.clients && residents.map((resident) => (
                 <button
                   key={`map-house-${resident.id}`}
@@ -2421,10 +3736,16 @@ export default function SecurityConsoleGame() {
               {mapLayers.points && WORLD_KEY_POINTS.map((point) => (
                 <button key={`map-point-${point.id}`} className={`world-point world-point-${point.kind}`} title={point.label} onClick={() => { setSelectedMapObject(point.label); setMapWaypoint({ x: point.x, z: point.z, label: point.label }); }} style={{ left: worldMapX(point.x), top: worldMapZ(point.z) }}>{point.short}</button>
               ))}
+              {quests.filter((quest) => quest.tracked && quest.status === "active").map((progress) => {
+                const definition = QUESTS.find((quest) => quest.id === progress.id);
+                if (!definition) return null;
+                return <button key={`map-quest-${progress.id}`} className={`world-quest world-quest-${definition.category}`} title={definition.title} onClick={() => setSelectedMapObject(`Задание: ${definition.title} · ${definition.short}`)} style={{ left: worldMapX(definition.target.x), top: worldMapZ(definition.target.z) }}>!</button>;
+              })}
               {mapLayers.notes && mapNotes.map((note) => <button key={note.id} className="world-note" title={note.text} onClick={() => setSelectedMapObject(note.text)} style={{ left: worldMapX(note.x), top: worldMapZ(note.z) }}>⚑</button>)}
               {mapWaypoint && <span className="world-waypoint" title={mapWaypoint.label} style={{ left: worldMapX(mapWaypoint.x), top: worldMapZ(mapWaypoint.z) }}>◎</span>}
               {mapWaypoint && <div className="world-route active" />}
-              {mapLayers.vehicles && <span className="world-car" title="Старый седан" style={{ left: worldMapX(carPos.x), top: worldMapZ(carPos.z) }}>◆</span>}
+              {mapLayers.vehicles && <span className="world-car" title={VEHICLE_BY_ID[currentVehicle].name} style={{ left: worldMapX(carPos.x), top: worldMapZ(carPos.z) }}>◆</span>}
+              {networkPlayers.filter((player) => player.id !== profile.id).map((player) => <span className="world-coop-player" title={`${player.name} · ${player.role}`} key={`world-coop-${player.id}`} style={{ left: worldMapX(player.x), top: worldMapZ(player.z) }}>{player.name.slice(0, 1)}</span>)}
               <span className="world-player" title={profile.nickname} style={{ left: worldMapX(playerPos.x), top: worldMapZ(playerPos.z) }}>{profile.nickname.slice(0, 1).toUpperCase()}</span>
             </div>
             <aside className="map-legend expanded">
@@ -2447,7 +3768,7 @@ export default function SecurityConsoleGame() {
 
       {mode === "pause" && (
         <section className="overlay pause-overlay">
-          <div className="pause-card"><small>Игра приостановлена</small><h1>Пульт охраны</h1><button className="primary-btn" onClick={() => setMode("world")}>Продолжить</button><button className="soft-btn" onClick={() => { setTabletTab("saves"); setMode("tablet"); }}>Сохранения</button><button className="soft-btn" onClick={() => manualSave("slot1")}>Быстро сохранить в слот 1</button></div>
+          <div className="pause-card"><small>Игра приостановлена</small><h1>Пульт охраны</h1><button className="primary-btn" onClick={() => setMode("world")}>Продолжить</button>{officeRented && totalContracts > 0 && <button className="soft-btn" onClick={() => startOffice()}>Дежурство · играть за пульт</button>}<button className="soft-btn" onClick={() => { setTabletTab("quests"); setMode("tablet"); }}>Журнал заданий</button><button className="soft-btn" onClick={() => setMinimapRotates((value) => !value)}>Миникарта: {minimapRotates ? "вращается за героем" : "север сверху"}</button><button className="soft-btn" onClick={() => { setTabletTab("saves"); setMode("tablet"); }}>Сохранения</button><button className="soft-btn" onClick={() => manualSave("slot1")}>Быстро сохранить в слот 1</button><button className="soft-btn" onClick={resetSave}>Начать заново</button></div>
         </section>
       )}
 
@@ -2464,6 +3785,7 @@ export default function SecurityConsoleGame() {
               <button className={officeZone === "storage" ? "active" : ""} onClick={() => setOfficeZone("storage")}>Склад оборудования</button>
               <button className={officeZone === "garage" ? "active" : ""} onClick={() => setOfficeZone("garage")}>Гараж</button>
             </div>
+            {officeZone !== "console" && <button className="office-console-enter" onClick={() => setOfficeZone("console")}>E · Сесть за пульт</button>}
             <button className="office-exit" onClick={() => setMode("world")}>E · Выйти из офиса</button>
           </aside>
           <div className="office-main">
@@ -2495,11 +3817,20 @@ export default function SecurityConsoleGame() {
               <div className="alarm-top"><b>{alarm ? "⚠ Входящий сигнал" : "Журнал реакции"}</b><small>{timeLabel}</small></div>
               <h3>{alarm ? alarm.type : alarmResult}</h3>
               <p>{alarm ? alarm.address : "Следующий сигнал появится автоматически."}</p>
+              {alarm && <div className="alarm-detail-grid">
+                <span><small>Клиент</small><b>{alarm.client}</b></span>
+                <span><small>Тариф</small><b>{alarm.tariff}</b></span>
+                <span><small>Хронология</small><b>{alarm.sensors.join(" → ")}</b></span>
+                <span><small>История</small><b>{alarm.history}</b></span>
+                <span className={`alarm-countdown ${alarmSeconds <= 10 ? "urgent" : ""}`}><small>Время решения</small><b>{alarmSeconds} сек.</b></span>
+              </div>}
               {alarm && <div className="alarm-actions">
                 <button className="alarm-action" onClick={() => handleAlarm("call")}>Позвонить клиенту</button>
                 <button className="alarm-action primary" onClick={() => handleAlarm("gbr")}>Отправить ГБР</button>
                 <button className="alarm-action" onClick={() => handleAlarm("self")}>Выехать лично</button>
                 <button className="alarm-action" onClick={() => handleAlarm("fire")}>Вызвать пожарных</button>
+                <button className="alarm-action" onClick={() => handleAlarm("police")}>Вызвать полицию</button>
+                <button className="alarm-action danger" onClick={() => handleAlarm("reset")}>Сбросить тревогу</button>
               </div>}
             </div>
             </>}
