@@ -144,7 +144,8 @@ test("contains right-hand bus service, intermediate stop, greener vegetation, an
   assert.match(source, /busSpeed = 16\.67/);
   assert.match(source, /const DRIVING_SIDE: DrivingSide = "right"/);
   assert.match(source, /laneZForDirection\(busDirection, 3\.8\)/);
-  assert.match(source, /laneZForDirection\(direction, 3\.2\)/);
+  assert.match(source, /civilianTrafficDirectionForLane\(laneZ\)/);
+  assert.match(source, /const laneZ = i % 2 === 0 \? -3\.2 : 3\.2/);
   assert.match(source, /group\.scale\.setScalar\(0\.6\)/);
   assert.match(source, /new THREE\.InstancedMesh\(grassGeometry, mat\(0x4f9f43\), 3000\)/);
   assert.doesNotMatch(source, /for \(let x = -88; x <= 88; x \+= 22\)/);
@@ -178,6 +179,7 @@ test("applies right-hand traffic rules, collision damage, and fines", async () =
   ]);
 
   assert.match(source, /wrongRightHandLane/);
+  assert.match(source, /travelDirectionX > 0\.25 && car\.position\.z < -0\.7/);
   assert.match(source, /В игре действует правостороннее движение/);
   assert.match(source, /applyTrafficPenalty/);
   assert.match(source, /Среднее ДТП/);
