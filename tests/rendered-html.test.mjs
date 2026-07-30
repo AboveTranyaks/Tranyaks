@@ -80,7 +80,7 @@ test("contains quests, expanded economy, districts, and fleet progression", asyn
   assert.match(source, /tradeInCurrentVehicle/);
   assert.match(source, /serviceVehicle/);
   assert.match(source, /buyStoreItem/);
-  assert.match(source, /СЕЛО ПЕРОВОРЕЧЕНСКОЕ/);
+  assert.match(source, /СЕЛО ПЕРВОРЕЧЕНСКОЕ/);
   assert.match(styles, /\.quest-journal/);
   assert.match(styles, /\.quest-offer/);
   assert.match(styles, /\.minimap-layer/);
@@ -101,12 +101,32 @@ test("contains complete reset, safe NPC respawn, map routing, and corrected walk
   assert.match(source, /networkChannelRef\.current\?\.close\(\)/);
   assert.match(source, /residentsFromSave\(save: SaveData\)/);
   assert.match(source, /DEFAULT_CAR_POSITION/);
-  assert.match(source, /const baseSpeed = jogging \? 3\.5 : fastWalking \? 2\.5 : 1\.4/);
+  assert.match(source, /const baseSpeed = jogging \? 3\.5 : fastWalking \? 2\.5 : 1\.35/);
   assert.match(source, /mapRouteStyle/);
   assert.match(source, /minimap-distance/);
   assert.match(styles, /\.world-route\.active[\s\S]*transform-origin:\s*0 50%/);
   assert.match(styles, /\.minimap-distance/);
   assert.match(styles, /\.full-reset-panel/);
+});
+
+test("resets statistics safely and renders liters, traffic, lights, and utility infrastructure", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /const isResettingRef = useRef\(false\)/);
+  assert.match(source, /if \(!isResettingRef\.current\) persist\(\)/);
+  assert.match(source, /const FUEL_TANK_LITERS = 40/);
+  assert.match(source, /carFuel: 20/);
+  assert.match(source, /Топливо \{carTelemetry\.fuel\.toFixed\(2\)\} л/);
+  assert.match(source, /type TrafficVehicle/);
+  assert.match(source, /makeCar\(trafficColors\[i % trafficColors\.length\], true\)/);
+  assert.match(source, /trafficDriver/);
+  assert.match(source, /const clouds: THREE\.Group\[\]/);
+  assert.match(source, /Utility corridor/);
+  assert.match(source, /headlightMaterials/);
+  assert.match(styles, /\.tablet-content \.soft-btn/);
 });
 
 test("contains rotating daily challenges and cooperative room systems", async () => {

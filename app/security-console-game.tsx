@@ -191,6 +191,15 @@ type Walker = {
   speed: number;
 };
 
+type TrafficVehicle = {
+  mesh: THREE.Group;
+  direction: 1 | -1;
+  speed: number;
+  laneZ: number;
+  minX: number;
+  maxX: number;
+};
+
 type Outfit = {
   id: OutfitId;
   name: string;
@@ -269,7 +278,7 @@ const DISTRICTS: DistrictSpec[] = [
   { id: "central", name: "Центральный район", subtitle: "Первореченское", x: 0, reputation: 0, contracts: 10, openingCost: 0, monthlyRent: 5000, color: "#8fb6a5" },
   { id: "residential", name: "Жилой район", subtitle: "Новые кварталы", x: 1350, reputation: 25, contracts: 20, openingCost: 20000, monthlyRent: 7000, color: "#c7ad78" },
   { id: "industrial", name: "Промышленный район", subtitle: "Склады и производства", x: 2700, reputation: 45, contracts: 35, openingCost: 35000, monthlyRent: 9000, color: "#88929b" },
-  { id: "elite", name: "Элитный район", subtitle: "Станица Динская", x: 4000, reputation: 65, contracts: 50, openingCost: 50000, monthlyRent: 12000, color: "#b99c79" },
+  { id: "elite", name: "Элитный район", subtitle: "ст. Динская", x: 4000, reputation: 65, contracts: 50, openingCost: 50000, monthlyRent: 12000, color: "#b99c79" },
 ];
 
 const RESIDENTIAL_PRICES = [
@@ -577,12 +586,8 @@ const ACHIEVEMENTS = [
   { id: "night_owl", title: "Ночной ястреб", description: "Успешно обработайте тревогу." },
 ] as const;
 
-const LEADERBOARD_SEED = [
-  { rank: 1, playerName: "Охранник_Вася", avatar: "avatar_04", value: 1500, trend: "up" },
-  { rank: 2, playerName: "Тихий_Пульт", avatar: "avatar_02", value: 1240, trend: "same" },
-  { rank: 3, playerName: "Станица_ГБР", avatar: "avatar_03", value: 980, trend: "up" },
-  { rank: 4, playerName: "Мария_Сигнал", avatar: "avatar_01", value: 760, trend: "down" },
-] as const;
+const LEADERBOARD_SEED: { rank: number; playerName: string; avatar: AvatarId; value: number; trend: "up" | "same" | "down" }[] = [];
+const FUEL_TANK_LITERS = 40;
 
 const DEFAULT_SAVE: SaveData = {
   money: 15000,
@@ -597,7 +602,7 @@ const DEFAULT_SAVE: SaveData = {
   weather: "Ясно",
   playerPos: DEFAULT_PLAYER_POSITION,
   carPos: DEFAULT_CAR_POSITION,
-  carFuel: 40,
+  carFuel: 20,
   carWear: 0,
   statistics: EMPTY_STATS,
   achievements: [],
@@ -650,6 +655,7 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
     vehicleSiren: value?.vehicleSiren ?? false,
     carClean: value?.carClean ?? false,
     seasonalTires: value?.seasonalTires ?? false,
+    carFuel: value?.carFuel === undefined ? 20 : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
 }
 
@@ -916,8 +922,10 @@ function makePerson(color: number) {
   shirtFront.position.set(0, 2.72, 0.78);
   const leftShoe = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.3, 0.82), mat(0x292d2b));
   leftShoe.position.set(-0.33, 0.15, 0.14);
+  leftShoe.name = "leftShoe";
   const rightShoe = leftShoe.clone();
   rightShoe.position.x = 0.33;
+  rightShoe.name = "rightShoe";
   group.add(
     leftLeg,
     rightLeg,
@@ -937,6 +945,7 @@ function makePerson(color: number) {
   group.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;
   });
+  group.scale.setScalar(0.72);
   return group;
 }
 
@@ -1034,6 +1043,7 @@ function makeHero() {
       object.receiveShadow = true;
     }
   });
+  hero.scale.setScalar(0.72);
   return hero;
 }
 
@@ -1065,6 +1075,8 @@ function animateHero(hero: THREE.Group, state: MovementState, now: number, fatig
   const rightLeg = hero.getObjectByName("rightLeg");
   const leftArm = hero.getObjectByName("leftArm");
   const rightArm = hero.getObjectByName("rightArm");
+  const leftShoe = hero.getObjectByName("leftShoe");
+  const rightShoe = hero.getObjectByName("rightShoe");
   const top = hero.getObjectByName("top");
   const outer = hero.getObjectByName("outer");
   const tablet = hero.getObjectByName("tablet");
@@ -1072,6 +1084,8 @@ function animateHero(hero: THREE.Group, state: MovementState, now: number, fatig
   if (rightLeg) rightLeg.rotation.x = -stride;
   if (leftArm) leftArm.rotation.x = -stride * 0.72;
   if (rightArm) rightArm.rotation.x = stride * 0.72;
+  if (leftShoe) leftShoe.rotation.x = stride * 0.82;
+  if (rightShoe) rightShoe.rotation.x = -stride * 0.82;
   const lean = fatigued ? 0.16 : state === "Бег трусцой" ? -0.1 : 0;
   if (top) top.rotation.x = THREE.MathUtils.lerp(top.rotation.x, lean, 0.12);
   if (outer) outer.rotation.x = THREE.MathUtils.lerp(outer.rotation.x, lean, 0.12);
@@ -1095,10 +1109,14 @@ function personWalkCycle(person: THREE.Group, moving: boolean, now: number, phas
   const rightLeg = person.getObjectByName("rightLeg");
   const leftArm = person.getObjectByName("leftArm");
   const rightArm = person.getObjectByName("rightArm");
+  const leftShoe = person.getObjectByName("leftShoe");
+  const rightShoe = person.getObjectByName("rightShoe");
   if (leftLeg) leftLeg.rotation.x = stride;
   if (rightLeg) rightLeg.rotation.x = -stride;
   if (leftArm) leftArm.rotation.x = -stride * 0.7;
   if (rightArm) rightArm.rotation.x = stride * 0.7;
+  if (leftShoe) leftShoe.rotation.x = stride * 0.78;
+  if (rightShoe) rightShoe.rotation.x = -stride * 0.78;
 }
 
 function touchesBox(x: number, z: number, radius: number, collider: WorldCollider) {
@@ -1109,15 +1127,22 @@ function touchesBox(x: number, z: number, radius: number, collider: WorldCollide
   return dx * dx + dz * dz < radius * radius;
 }
 
-function makeCar() {
+function makeCar(bodyColor = 0xc85f4c, withDriver = false) {
   const group = new THREE.Group();
   group.name = "carRoot";
   const visual = new THREE.Group();
   visual.name = "carVisual";
-  const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 6.2), mat(0xc85f4c));
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 6.2), mat(bodyColor));
   body.position.y = 1.05;
   body.name = "carBody";
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.7, 1.15, 3.1), mat(0x9bc1c7));
+  const cabinMaterial = new THREE.MeshStandardMaterial({
+    color: 0x9bc1c7,
+    roughness: 0.26,
+    transparent: withDriver,
+    opacity: withDriver ? 0.68 : 1,
+    flatShading: true,
+  });
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.7, 1.15, 3.1), cabinMaterial);
   cabin.position.set(0, 1.95, -0.25);
   cabin.geometry.rotateX(-0.05);
   const frontLightMaterial = new THREE.MeshStandardMaterial({ color: 0xffe6ad, emissive: 0xffd37a, emissiveIntensity: 0.25 });
@@ -1125,9 +1150,24 @@ function makeCar() {
   for (const x of [-1.03, 1.03]) {
     const front = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.34, 0.12), frontLightMaterial);
     front.position.set(x, 1.08, 3.15);
+    front.name = "headlight";
     const rear = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.32, 0.12), rearLightMaterial);
     rear.position.set(x, 1.04, -3.15);
     visual.add(front, rear);
+  }
+  if (withDriver) {
+    const driver = new THREE.Group();
+    driver.name = "trafficDriver";
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.48, 0.82, 6), mat(0x476b58));
+    torso.position.y = 1.75;
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.35, 1), mat(0xdfb27f));
+    head.position.y = 2.42;
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.34, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x4d372d));
+    hair.position.y = 2.55;
+    hair.scale.y = 0.45;
+    driver.position.set(-0.68, 0, 0.38);
+    driver.add(torso, head, hair);
+    visual.add(driver);
   }
   visual.add(body, cabin);
   for (const x of [-1.58, 1.58]) {
@@ -1171,6 +1211,7 @@ export default function SecurityConsoleGame() {
     residents: Resident[];
     colliders: WorldCollider[];
     walkers: Walker[];
+    traffic: TrafficVehicle[];
     remoteMeshes: Map<string, THREE.Group>;
     nearest: Resident | null;
     time: number;
@@ -1184,7 +1225,7 @@ export default function SecurityConsoleGame() {
     carSpeed: 0,
     carSteer: 0,
     carSlip: 0,
-    fuel: 40,
+    fuel: 20,
     odometer: 0,
     wear: 0,
     surface: "Асфальт",
@@ -1193,6 +1234,7 @@ export default function SecurityConsoleGame() {
     residents: [],
     colliders: [],
     walkers: [],
+    traffic: [],
     remoteMeshes: new Map(),
     nearest: null,
     time: 8.25,
@@ -1233,7 +1275,7 @@ export default function SecurityConsoleGame() {
   const weatherRef = useRef<WeatherKind>(initialSave.weather ?? "Ясно");
   const [movementState, setMovementState] = useState<MovementState>("Покой");
   const [playerSpeedKmh, setPlayerSpeedKmh] = useState(0);
-  const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: initialSave.carFuel ?? 40, surface: "Асфальт" as SurfaceKind, wear: initialSave.carWear ?? 0 });
+  const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: initialSave.carFuel ?? 20, surface: "Асфальт" as SurfaceKind, wear: initialSave.carWear ?? 0 });
   const [outfitId, setOutfitId] = useState<OutfitId>(initialOutfit);
   const outfitRef = useRef<OutfitId>(initialOutfit);
   const [ownedOutfits, setOwnedOutfits] = useState<OutfitId[]>(initialOwned);
@@ -1300,6 +1342,7 @@ export default function SecurityConsoleGame() {
   const [networkPlayers, setNetworkPlayers] = useState<NetworkPlayer[]>([]);
   const networkPlayersRef = useRef(networkPlayers);
   const networkChannelRef = useRef<BroadcastChannel | null>(null);
+  const isResettingRef = useRef(false);
   const [networkChat, setNetworkChat] = useState<NetworkChatMessage[]>([]);
   const [networkChatInput, setNetworkChatInput] = useState("");
   const [saveSlots, setSaveSlots] = useState<Record<SaveSlotId, SaveEnvelope | null>>(() => ({
@@ -1332,6 +1375,18 @@ export default function SecurityConsoleGame() {
   const monthlyExpenses = staffExpense + branchExpense + (ownedVehicles.length >= 3 ? 5000 : 0);
   const selectedQuest = QUESTS.find((quest) => quest.id === selectedQuestId) ?? QUESTS[0];
   const activeNpc = residents.find((r) => r.id === activeNpcId) ?? null;
+  const leaderboardValue =
+    leaderboardCategory === "clients"
+      ? totalContracts
+      : leaderboardCategory === "income"
+        ? statistics.maxIncome
+        : leaderboardCategory === "prevention_rate"
+          ? statistics.alarmsResponded > 0
+            ? Math.round(statistics.successfulPreventions / statistics.alarmsResponded * 100)
+            : 0
+          : leaderboardCategory === "level"
+            ? Math.max(1, Math.floor(reputation / 10) + 1)
+            : reputation;
 
   const flash = useCallback((message: string) => {
     setToast(message);
@@ -1361,6 +1416,7 @@ export default function SecurityConsoleGame() {
 
   const persist = useCallback(
     (nextResidents = residentsRef.current, nextMoney = money, nextRep = reputation, slot: SaveSlotId = "auto", saveName = "Автосохранение") => {
+      if (isResettingRef.current) return;
       const engine = engineRef.current;
       const save: SaveData = {
         money: nextMoney,
@@ -1657,7 +1713,6 @@ export default function SecurityConsoleGame() {
       let mesh = engineRef.current.remoteMeshes.get(networkPlayer.id);
       if (!mesh) {
         mesh = makeHero();
-        mesh.scale.setScalar(0.96);
         applyOutfit(mesh, OUTFIT_BY_ID.casual);
         scene.add(mesh);
         engineRef.current.remoteMeshes.set(networkPlayer.id, mesh);
@@ -1690,7 +1745,9 @@ export default function SecurityConsoleGame() {
   }, [flash, quests]);
 
   useEffect(() => {
-    const onBeforeUnload = () => persist();
+    const onBeforeUnload = () => {
+      if (!isResettingRef.current) persist();
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [persist]);
@@ -1740,6 +1797,10 @@ export default function SecurityConsoleGame() {
     sun.shadow.camera.right = 110;
     sun.shadow.camera.top = 110;
     sun.shadow.camera.bottom = -110;
+    sun.shadow.bias = -0.00035;
+    const sunTarget = new THREE.Object3D();
+    sun.target = sunTarget;
+    scene.add(sunTarget);
     scene.add(sun);
 
     const starGeometry = new THREE.BufferGeometry();
@@ -1772,6 +1833,29 @@ export default function SecurityConsoleGame() {
     rain.visible = false;
     scene.add(rain);
 
+    const clouds: THREE.Group[] = [];
+    const cloudMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf1f0e7,
+      roughness: 1,
+      transparent: true,
+      opacity: 0.9,
+      flatShading: true,
+    });
+    for (let i = 0; i < 30; i++) {
+      const cloud = new THREE.Group();
+      const pieces = 3 + (i % 3);
+      for (let j = 0; j < pieces; j++) {
+        const piece = new THREE.Mesh(new THREE.IcosahedronGeometry(5.2 + ((i + j) % 4), 1), cloudMaterial);
+        piece.position.set(j * 6 - pieces * 2.5, Math.sin(j * 1.7) * 1.6, (j % 2) * 2.5);
+        piece.scale.y = 0.62;
+        piece.castShadow = true;
+        cloud.add(piece);
+      }
+      cloud.position.set(-150 + ((i * 157) % 4300), 54 + ((i * 11) % 24), -145 + ((i * 47) % 290));
+      scene.add(cloud);
+      clouds.push(cloud);
+    }
+
     const dustPuffs: { mesh: THREE.Mesh; life: number }[] = [];
     for (let i = 0; i < 18; i++) {
       const dustMaterial = new THREE.MeshStandardMaterial({
@@ -1790,9 +1874,11 @@ export default function SecurityConsoleGame() {
     let dustTimer = 0;
     const windowMaterials: THREE.MeshStandardMaterial[] = [];
     const lampMaterials: THREE.MeshStandardMaterial[] = [];
+    const headlightMaterials: THREE.MeshStandardMaterial[] = [];
 
     engine.colliders = [];
     engine.walkers = [];
+    engine.traffic = [];
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 420), mat(0x8fb277));
     ground.rotation.x = -Math.PI / 2;
@@ -1922,6 +2008,54 @@ export default function SecurityConsoleGame() {
       scene.add(lamp);
     }
 
+    // Utility corridor: poles every 60 m, a street lamp on every second pole,
+    // and three gently sagging wires between adjacent supports.
+    const wireMaterial = new THREE.LineBasicMaterial({ color: 0x273b36, transparent: true, opacity: 0.78 });
+    const poleXs: number[] = [];
+    for (let x = -150; x <= 4150; x += 60) {
+      poleXs.push(x);
+      const pole = new THREE.Group();
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.19, 8, 7), mat(0x4a453b));
+      mast.position.y = 4;
+      mast.castShadow = true;
+      const crossbar = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.18, 0.2), mat(0x3a3934));
+      crossbar.position.y = 7.35;
+      crossbar.castShadow = true;
+      pole.add(mast, crossbar);
+      if ((poleXs.length - 1) % 2 === 0) {
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.12, 0.12), mat(0x3a3934));
+        arm.position.set(-0.72, 6.8, -0.4);
+        arm.rotation.z = -0.12;
+        const lampMaterial = new THREE.MeshStandardMaterial({
+          color: 0xffdc8d,
+          emissive: 0xffb64b,
+          emissiveIntensity: 0.08,
+          roughness: 0.5,
+        });
+        const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.28, 7, 5), lampMaterial);
+        bulb.position.set(-1.45, 6.63, -0.4);
+        lampMaterials.push(lampMaterial);
+        pole.add(arm, bulb);
+      }
+      pole.position.set(x, 0, 15);
+      scene.add(pole);
+    }
+    for (let i = 0; i < poleXs.length - 1; i++) {
+      const x1 = poleXs[i];
+      const x2 = poleXs[i + 1];
+      for (const zOffset of [-1.25, 0, 1.25]) {
+        const wire = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(x1, 7.45, 15 + zOffset),
+            new THREE.Vector3((x1 + x2) / 2, 6.95, 15 + zOffset),
+            new THREE.Vector3(x2, 7.45, 15 + zOffset),
+          ]),
+          wireMaterial,
+        );
+        scene.add(wire);
+      }
+    }
+
     box(scene, [18, 7, 13], [92, 3.5, -18], 0x446f59);
     box(scene, [8, 1.1, 0.4], [92, 6.2, -11.3], 0xcce86b);
     const officeSign = document.createElement("canvas");
@@ -1988,13 +2122,13 @@ export default function SecurityConsoleGame() {
         signCtx.lineWidth = 14;
         signCtx.strokeRect(7, 7, canvas.width - 14, canvas.height - 14);
         signCtx.fillStyle = "#263f37";
-        signCtx.font = "bold 50px Arial";
+        signCtx.font = `bold ${text.length > 18 ? 40 : 50}px Arial`;
         signCtx.textAlign = "center";
         signCtx.fillText(text, canvas.width / 2, 82);
       }
       const texture = new THREE.CanvasTexture(canvas);
       const board = new THREE.Mesh(
-        new THREE.PlaneGeometry(10, 2),
+        new THREE.PlaneGeometry(text.length > 18 ? 13 : 10, 2),
         new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }),
       );
       board.position.set(x, 4.2, z);
@@ -2004,7 +2138,7 @@ export default function SecurityConsoleGame() {
       box(scene, [0.22, 4, 0.22], [x, 2, z + 3.5], 0x33423d);
     };
     makeRoadSign("ДИНСКАЯ", 205, -12);
-    makeRoadSign("СЕЛО ПЕРОВОРЕЧЕНСКОЕ", 3795, -12, true);
+    makeRoadSign("СЕЛО ПЕРВОРЕЧЕНСКОЕ", 3795, 14, true);
 
     const player = makeHero();
     player.position.set(initialPlayerPosition.x, 0, initialPlayerPosition.z);
@@ -2018,13 +2152,12 @@ export default function SecurityConsoleGame() {
     scene.add(car);
     engine.car = car;
     engine.time = initialSave.gameTime ?? 8.25;
-    engine.fuel = initialSave.carFuel ?? 40;
+    engine.fuel = initialSave.carFuel ?? 20;
     engine.wear = initialSave.carWear ?? 0;
 
     residentsRef.current.forEach((resident) => {
       const npc = makePerson(resident.color);
       npc.position.set(resident.x + 5, 0, resident.z + (resident.z > 0 ? -5 : 5));
-      if (resident.signed) npc.scale.setScalar(0.92);
       const marker = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.55, 0),
         mat(resident.signed ? 0xcce86b : 0xf28c55),
@@ -2058,6 +2191,29 @@ export default function SecurityConsoleGame() {
           speed: 0.75 + (i % 4) * 0.14,
         });
       }
+    }
+
+    const trafficColors = [0x587e91, 0xd39a4b, 0x6f8c68, 0x8b6688, 0xc65d4d, 0xd4d0bd];
+    for (let i = 0; i < 14; i++) {
+      const direction = (i % 2 === 0 ? 1 : -1) as 1 | -1;
+      const trafficCar = makeCar(trafficColors[i % trafficColors.length], true);
+      trafficCar.scale.setScalar(0.82 + (i % 3) * 0.05);
+      trafficCar.position.set(-130 + ((i * 317) % 4260), 0, direction > 0 ? -3.2 : 3.2);
+      trafficCar.rotation.y = direction > 0 ? Math.PI / 2 : -Math.PI / 2;
+      trafficCar.traverse((part) => {
+        if (part instanceof THREE.Mesh && part.name === "headlight" && part.material instanceof THREE.MeshStandardMaterial) {
+          headlightMaterials.push(part.material);
+        }
+      });
+      scene.add(trafficCar);
+      engine.traffic.push({
+        mesh: trafficCar,
+        direction,
+        speed: 6.5 + (i % 5) * 0.65,
+        laneZ: direction > 0 ? -3.2 : 3.2,
+        minX: -170,
+        maxX: 4170,
+      });
     }
 
     let last = performance.now();
@@ -2225,6 +2381,11 @@ export default function SecurityConsoleGame() {
           return true;
         }
       }
+      for (const trafficVehicle of engine.traffic) {
+        if (Math.hypot(x - trafficVehicle.mesh.position.x, z - trafficVehicle.mesh.position.z) < radius + 2.2) {
+          return true;
+        }
+      }
       if (includeCar && Math.hypot(x - car.position.x, z - car.position.z) < radius + 2.25) return true;
       return false;
     };
@@ -2291,7 +2452,10 @@ export default function SecurityConsoleGame() {
           const travelled = Math.abs(engine.carSpeed) * dt;
           engine.odometer += travelled / 1000;
           statisticsRef.current.kmDriven += travelled / 1000;
-          engine.fuel = Math.max(0, engine.fuel - travelled * 0.000006 * VEHICLE_BY_ID[currentVehicleRef.current].fuelUse * (1 + Math.abs(throttle) * 0.18));
+          engine.fuel = Math.max(
+            0,
+            engine.fuel - (travelled / 100_000) * VEHICLE_BY_ID[currentVehicleRef.current].fuelUse * (1 + Math.abs(throttle) * 0.18),
+          );
         } else {
           const impact = Math.abs(engine.carSpeed);
           engine.carSpeed *= -0.12;
@@ -2334,7 +2498,7 @@ export default function SecurityConsoleGame() {
         const surface = surfaceAt(player.position.x, player.position.z);
         const surfaceSpeed = surface === "Асфальт" ? 1 : surface === "Грунт" ? 0.95 * outfit.ground : 0.85 * outfit.ground;
         const fatigueSpeed = energyRef.current < 20 ? 0.7 : 1;
-        const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.4;
+        const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.35;
         const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed;
         currentWalkSpeedKmh = moving ? speed * 3.6 : 0;
         if (moving) {
@@ -2382,6 +2546,9 @@ export default function SecurityConsoleGame() {
       const stormFlash = weatherRef.current === "Гроза" && Math.sin(now * 0.0017) > 0.994;
       sun.intensity = (0.35 + dayFactor * 2.7) * cloudFactor + (stormFlash ? 4.5 : 0);
       hemi.intensity = (0.35 + dayFactor * 1.8) * cloudFactor + (stormFlash ? 1.8 : 0);
+      sun.position.set(focus.position.x - 45, 70, focus.position.z - 30);
+      sunTarget.position.set(focus.position.x, 0, focus.position.z);
+      sunTarget.updateMatrixWorld();
       const dayColor = new THREE.Color(weatherRef.current === "Ясно" ? 0x91bfc1 : weatherRef.current === "Облачно" ? 0xa8b8b7 : 0x657f87);
       const sunsetColor = new THREE.Color(0xd88778);
       const nightColor = new THREE.Color(0x182940);
@@ -2400,6 +2567,11 @@ export default function SecurityConsoleGame() {
       sun.color.setHex(sunsetStrength > 0.25 ? 0xffb071 : dayFactor < 0.25 ? 0xd0e0f0 : 0xfff0d4);
       stars.visible = dayFactor < 0.24 && !wetWeather;
       stars.position.set(focus.position.x, 0, focus.position.z);
+      clouds.forEach((cloud, index) => {
+        cloud.position.x += dt * (0.65 + (index % 4) * 0.08);
+        if (cloud.position.x > 4185) cloud.position.x = -185;
+        cloudMaterial.opacity = weatherRef.current === "Ясно" ? 0.82 : wetWeather ? 0.96 : 0.9;
+      });
       rain.visible = wetWeather;
       rain.position.set(focus.position.x, 0, focus.position.z);
       if (rain.visible) {
@@ -2419,6 +2591,9 @@ export default function SecurityConsoleGame() {
       lampMaterials.forEach((material) => {
         material.emissiveIntensity = 0.1 + nightGlow * 2.2;
       });
+      headlightMaterials.forEach((material) => {
+        material.emissiveIntensity = 0.12 + nightGlow * 3.8;
+      });
 
       engine.residents.forEach((resident, i) => {
         if (!resident.mesh) return;
@@ -2437,6 +2612,18 @@ export default function SecurityConsoleGame() {
         walker.mesh.position.z = walker.laneZ;
         walker.mesh.rotation.y = walker.direction > 0 ? Math.PI / 2 : -Math.PI / 2;
         personWalkCycle(walker.mesh, true, now, i * 0.7);
+      });
+      engine.traffic.forEach((trafficVehicle) => {
+        trafficVehicle.mesh.position.x += trafficVehicle.direction * trafficVehicle.speed * dt;
+        if (trafficVehicle.mesh.position.x > trafficVehicle.maxX) trafficVehicle.mesh.position.x = trafficVehicle.minX;
+        if (trafficVehicle.mesh.position.x < trafficVehicle.minX) trafficVehicle.mesh.position.x = trafficVehicle.maxX;
+        trafficVehicle.mesh.position.z = trafficVehicle.laneZ;
+        trafficVehicle.mesh.rotation.y = trafficVehicle.direction > 0 ? Math.PI / 2 : -Math.PI / 2;
+        trafficVehicle.mesh.traverse((part) => {
+          if (part instanceof THREE.Mesh && (part.name === "frontWheel" || part.name === "rearWheel")) {
+            part.rotation.x += trafficVehicle.direction * trafficVehicle.speed * dt / 0.58;
+          }
+        });
       });
 
       if (canMove && !engine.driving) {
@@ -2480,14 +2667,17 @@ export default function SecurityConsoleGame() {
         setPlayerSpeedKmh(Math.round(currentWalkSpeedKmh * 10) / 10);
         setCarTelemetry({
           speed: Math.round(Math.abs(engine.carSpeed) * 3.6),
-          fuel: Math.round(engine.fuel * 10) / 10,
+          fuel: Math.round(engine.fuel * 100) / 100,
           surface: engine.surface,
           wear: Math.round(engine.wear),
         });
-        const currentDistrict = DISTRICTS.reduce((closest, district) =>
-          Math.abs(district.x - focus.position.x) < Math.abs(closest.x - focus.position.x) ? district : closest,
+        setLocationName(
+          focus.position.x < 450
+            ? "село Первореченское"
+            : focus.position.x > 3550
+              ? "ст. Динская"
+              : "трасса Первореченское — Динская",
         );
-        setLocationName(currentDistrict.id === "central" ? "село Первореченское" : currentDistrict.subtitle);
       }
       if (statisticsTick > 1) {
         statisticsTick = 0;
@@ -2954,7 +3144,7 @@ export default function SecurityConsoleGame() {
 
   const serviceVehicle = (action: "fuel" | "wash" | "repair" | "tires" | "siren") => {
     const prices = {
-      fuel: Math.max(0, Math.round((100 - engineRef.current.fuel) / 100 * 40 * 50)),
+      fuel: Math.max(0, Math.round((FUEL_TANK_LITERS - engineRef.current.fuel) * 50)),
       wash: 200,
       repair: Math.max(500, Math.round(engineRef.current.wear / 100 * 15000)),
       tires: 2000,
@@ -2967,8 +3157,8 @@ export default function SecurityConsoleGame() {
     const nextMoney = money - price;
     setMoney(nextMoney);
     if (action === "fuel") {
-      engineRef.current.fuel = 100;
-      setCarTelemetry((value) => ({ ...value, fuel: 100 }));
+      engineRef.current.fuel = FUEL_TANK_LITERS;
+      setCarTelemetry((value) => ({ ...value, fuel: FUEL_TANK_LITERS }));
       updateDailyChallenge("upgrades");
     }
     if (action === "wash") {
@@ -3109,6 +3299,7 @@ export default function SecurityConsoleGame() {
 
   const FullResetAndRestart = () => {
     if (!window.confirm("Сбросить игру полностью? Будут удалены профиль, деньги, договоры, районы, транспорт, задания, статистика и все слоты сохранений.")) return;
+    isResettingRef.current = true;
     try {
       networkChannelRef.current?.postMessage({ type: "leave", senderId: profileRef.current.id });
       networkChannelRef.current?.close();
@@ -3131,7 +3322,19 @@ export default function SecurityConsoleGame() {
       playerPos: { ...DEFAULT_PLAYER_POSITION },
       carPos: { ...DEFAULT_CAR_POSITION },
       statistics: { ...EMPTY_STATS },
+      achievements: [],
+      extendedContracts: [],
+      openedBranches: ["central"],
+      staff: { ...EMPTY_STAFF },
+      ownedVehicles: ["old_sedan"],
+      currentVehicle: "old_sedan",
+      loan: null,
+      businessMonth: 1,
+      officeRented: false,
+      quests: DEFAULT_QUESTS.map((quest) => ({ ...quest })),
       dailyChallenges: createDailyChallenges(undefined, false),
+      carFuel: 20,
+      carWear: 0,
     });
     try {
       localStorage.setItem(ACTIVE_SAVE_KEY, JSON.stringify(cleanStart));
@@ -3221,8 +3424,8 @@ export default function SecurityConsoleGame() {
               <div className="vehicle-speed"><b>{carTelemetry.speed}</b><span>км/ч</span></div>
               <div className="vehicle-data">
                 <span>{carTelemetry.surface} · двигатель {carUpgrade + 1}/4</span>
-                <span>Топливо {Math.round(carTelemetry.fuel)}% · износ {Math.round(carTelemetry.wear)}%</span>
-                <div className="vehicle-gauge"><i style={{ width: `${carTelemetry.fuel}%` }} /></div>
+                <span>Топливо {carTelemetry.fuel.toFixed(2)} л · износ {Math.round(carTelemetry.wear)}%</span>
+                <div className="vehicle-gauge"><i style={{ width: `${clamp(carTelemetry.fuel / FUEL_TANK_LITERS * 100, 0, 100)}%` }} /></div>
               </div>
             </div>
           )}
@@ -3656,7 +3859,7 @@ export default function SecurityConsoleGame() {
                   })}
                 </div>
                 <div className="vehicle-service-panel">
-                  <div><small>Активная машина</small><h2>{VEHICLE_BY_ID[currentVehicle].name}</h2><p>Топливо {Math.round(carTelemetry.fuel)}% · износ {Math.round(carTelemetry.wear)}% · {carClean ? "чистая" : "нужна мойка"} · {seasonalTires ? "сезонные шины" : "обычные шины"} · {vehicleSiren ? "мигалка установлена" : "без мигалки"}</p></div>
+                  <div><small>Активная машина</small><h2>{VEHICLE_BY_ID[currentVehicle].name}</h2><p>Топливо {carTelemetry.fuel.toFixed(2)} л / {FUEL_TANK_LITERS} л · износ {Math.round(carTelemetry.wear)}% · {carClean ? "чистая" : "нужна мойка"} · {seasonalTires ? "сезонные шины" : "обычные шины"} · {vehicleSiren ? "мигалка установлена" : "без мигалки"}</p></div>
                   <div className="service-actions">
                     <button onClick={() => serviceVehicle("fuel")}>Заправить · 50 ₽/л</button>
                     <button onClick={() => serviceVehicle("wash")}>Мойка · 200 ₽</button>
@@ -3745,10 +3948,10 @@ export default function SecurityConsoleGame() {
                 <div className="leaderboard-table">
                   <div className="leaderboard-row header"><span>Место</span><span>Игрок</span><span>Показатель</span><span>Тренд</span></div>
                   {LEADERBOARD_SEED.map((row) => <div className="leaderboard-row" key={row.playerName}><span>#{row.rank}</span><span><i className={`mini-avatar ${row.avatar}`} />{row.playerName}</span><b>{row.value}</b><span>{row.trend === "up" ? "↑" : row.trend === "down" ? "↓" : "—"}</span></div>)}
-                  <div className="leaderboard-row me"><span>#{Math.max(5, 100 - reputation)}</span><span><i className={`mini-avatar ${profile.avatar}`} />{profile.nickname} · вы</span><b>{leaderboardCategory === "clients" ? signedCount : leaderboardCategory === "income" ? monthlyIncome : reputation}</b><span>↑</span></div>
+                  <div className="leaderboard-row me"><span>#1</span><span><i className={`mini-avatar ${profile.avatar}`} />{profile.nickname} · вы</span><b>{leaderboardValue}</b><span>{leaderboardValue > 0 ? "↑" : "—"}</span></div>
                 </div>
                 <h2>Сообщество</h2>
-                <div className="community-grid"><div><b>12 846</b><span>договоров</span></div><div><b>3 209</b><span>предотвращений</span></div><div><b>84 720 км</b><span>общий пробег</span></div><div><b>Стандарт</b><span>популярный тариф</span></div></div>
+                <div className="community-grid"><div><b>{totalContracts}</b><span>договоров</span></div><div><b>{statistics.successfulPreventions}</b><span>предотвращений</span></div><div><b>{(statistics.kmWalked + statistics.kmDriven).toFixed(2)} км</b><span>общий пробег</span></div><div><b>{totalContracts > 0 ? "Стандарт" : "—"}</b><span>популярный тариф</span></div></div>
               </>}
               {tabletTab === "saves" && <>
                 <h1>Сохранения</h1>
@@ -3977,7 +4180,7 @@ export default function SecurityConsoleGame() {
                   <div className="garage-car"><i /><span /><b /></div>
                   <div>
                     <small>Состояние автомобиля</small>
-                    <h3>Топливо {Math.round(carTelemetry.fuel)}% · износ {Math.round(carTelemetry.wear)}%</h3>
+                    <h3>Топливо {carTelemetry.fuel.toFixed(2)} л / {FUEL_TANK_LITERS} л · износ {Math.round(carTelemetry.wear)}%</h3>
                     <p>Улучшение повышает тягу и максимальную скорость. На грунте машина всё равно требует аккуратной работы рулём.</p>
                     <button className="garage-upgrade" onClick={() => handleOfficeAction("upgrade")} disabled={carUpgrade >= 3}>
                       {carUpgrade >= 3 ? "Максимальная комплектация" : `Установить улучшение · ${(7000 + carUpgrade * 4500).toLocaleString("ru-RU")} ₽`}

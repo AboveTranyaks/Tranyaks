@@ -274,7 +274,7 @@ button {
 
 .vehicle-card {
   position: absolute;
-  right: 215px;
+  right: 270px;
   bottom: 25px;
   display: flex;
   align-items: center;
@@ -985,6 +985,21 @@ kbd {
 
 .tablet-content > p {
   color: #748178;
+}
+
+.tablet-content .soft-btn {
+  border-color: #c6cec2;
+  background: #edf0e8;
+  color: #29473a;
+}
+
+.tablet-content .soft-btn:hover {
+  background: #e0e8da;
+}
+
+.tablet-content .soft-btn:disabled {
+  color: #68756e;
+  opacity: 0.58;
 }
 
 .hero-profile-head {
@@ -2598,7 +2613,7 @@ kbd {
   }
 
   .vehicle-card {
-    right: 164px;
+    right: 190px;
     bottom: 24px;
     min-width: 205px;
     transform: scale(0.86);
@@ -2635,7 +2650,7 @@ kbd {
 }
 
 /* Quest journal and expanded company management */
-.quest-hud { position: fixed; left: 32px; top: 154px; width: min(310px, 28vw); display: grid; gap: 7px; pointer-events: none; }
+.quest-hud { position: fixed; left: 32px; top: 190px; width: min(310px, 28vw); display: grid; gap: 7px; pointer-events: none; }
 .quest-hud > div { display: grid; gap: 3px; padding: 10px 12px; color: #eef6e8; background: rgba(28,45,41,.82); border-left: 3px solid #edaa54; border-radius: 0 10px 10px 0; box-shadow: 0 8px 22px rgba(18,30,27,.16); }
 .quest-hud b { font-size: 12px; }
 .quest-hud span { font-size: 10px; opacity: .82; }
@@ -2770,7 +2785,7 @@ kbd {
 .streak-roadmap div b { color: #244333; }
 .streak-roadmap div span { color: #3f4d45; line-height: 1.35; }
 .streak-roadmap div.done { border-color: #d99d45; border-left-color: #d99d45; background: #fff0cf; }
-.daily-hud { position: fixed; left: 32px; top: 330px; display: grid; gap: 6px; width: 245px; pointer-events: none; }
+.daily-hud { position: fixed; left: 32px; top: 380px; display: grid; gap: 6px; width: 245px; pointer-events: none; }
 .daily-hud > div { display: grid; grid-template-columns: 30px 1fr; gap: 8px; align-items: center; padding: 8px; border-radius: 10px; color: #fff5da; background: rgba(45,57,52,.84); }
 .daily-hud i { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: #d58d42; font-style: normal; }
 .daily-hud span { display: flex; justify-content: space-between; gap: 6px; font-size: 10px; }
