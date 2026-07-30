@@ -549,11 +549,11 @@ const BUS_STOP_DWELL_GAME_MINUTES = 5;
 const laneZForDirection = (direction: 1 | -1, offset: number) =>
   DRIVING_SIDE === "right"
     ? direction > 0
-      ? -offset
-      : offset
-    : direction > 0
       ? offset
-      : -offset;
+      : -offset
+    : direction > 0
+      ? -offset
+      : offset;
 // The main road is viewed along its X axis: the screen-right lane is +Z.
 // Civilian cars therefore move forward (+X) on +Z and toward the player on -Z.
 const civilianTrafficDirectionForLane = (laneZ: number): 1 | -1 => (laneZ > 0 ? 1 : -1);
@@ -1356,8 +1356,8 @@ function makeBus() {
   const route = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.72), new THREE.MeshBasicMaterial({ map: makeTextBoard("ДИНСКАЯ — ПЕРВОРЕЧЕНСКОЕ"), side: THREE.DoubleSide }));
   route.position.set(0, 2.62, 4.62);
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.25, 2.15, 0.12), mat(0x426b68));
-  // Local +X is the right side of the bus when it travels forward (+Z).
-  door.position.set(1.15, 1.48, 4.66);
+  // The curb-side door is on local -X when the bus travels forward (+Z).
+  door.position.set(-1.15, 1.48, 4.66);
   door.name = "busDoor";
   const driver = makePerson(0x4e6f5d);
   driver.scale.setScalar(0.42);
@@ -2161,9 +2161,11 @@ export default function SecurityConsoleGame() {
       box(scene, [6, 0.03, 0.28], [x, 0.23, 0], 0xe9e5da);
     }
     for (const centreX of DISTRICTS.map((district) => district.x)) {
-      box(scene, [13, 0.19, 350], [centreX + 18, 0.12, 15], 0xb7ad98);
-      box(scene, [260, 0.19, 10], [centreX, 0.13, 72], 0xb7ad98);
-      box(scene, [220, 0.19, 9], [centreX, 0.13, -72], 0xc2ae8a);
+      // Country roads sit slightly below the main asphalt, so intersections
+      // do not create a raised lip across the carriageway.
+      box(scene, [13, 0.12, 350], [centreX + 18, 0.08, 15], 0xb7ad98);
+      box(scene, [260, 0.12, 10], [centreX, 0.08, 72], 0xb7ad98);
+      box(scene, [220, 0.12, 9], [centreX, 0.08, -72], 0xc2ae8a);
     }
 
     const riverMat = new THREE.MeshStandardMaterial({
@@ -2951,7 +2953,10 @@ export default function SecurityConsoleGame() {
 
       // 06:00–21:00 lasts two real hours; the nine-hour night lasts 15 minutes.
       const isDay = engine.time >= 6 && engine.time < 21;
-      engine.time += dt * (isDay ? 15 / 7200 : 9 / 900);
+      const worldClockActive = modeRef.current !== "intro" && modeRef.current !== "pause";
+      if (worldClockActive) {
+        engine.time += dt * (isDay ? 15 / 7200 : 9 / 900);
+      }
       if (engine.time >= 24) engine.time -= 24;
       if (previousGameTime < 8 && engine.time >= 8) persistRef.current();
       previousGameTime = engine.time;
@@ -3042,7 +3047,8 @@ export default function SecurityConsoleGame() {
         });
       });
       const busOperating = engine.time >= 6 && engine.time < 23;
-      const busGameTimeDelta = (engine.time - lastBusGameTime + 24) % 24;
+      const busClockActive = modeRef.current === "world";
+      const busGameTimeDelta = busClockActive ? (engine.time - lastBusGameTime + 24) % 24 : 0;
       lastBusGameTime = engine.time;
       bus.visible = busOperating;
       if (busOperating) {
@@ -3070,7 +3076,7 @@ export default function SecurityConsoleGame() {
               }
             });
           }
-        } else {
+        } else if (busClockActive) {
           const targetX = BUS_STOPS[busNextStop].x;
           const remaining = targetX - bus.position.x;
           const busSpeed = 16.67;
@@ -3089,12 +3095,14 @@ export default function SecurityConsoleGame() {
         bus.position.z = laneZForDirection(busDirection, 3.8);
         bus.rotation.y = busDirection > 0 ? Math.PI / 2 : -Math.PI / 2;
         const busDoor = bus.getObjectByName("busDoor");
-        if (busDoor) busDoor.position.x = THREE.MathUtils.lerp(busDoor.position.x, busDwellGameHours > 0 ? 1.72 : 1.15, 0.08);
-        bus.traverse((part) => {
-          if (part instanceof THREE.Mesh && part.name === "busWheel") {
-            part.rotation.x += busDirection * 16.67 * dt / 0.68;
-          }
-        });
+        if (busDoor) busDoor.position.x = THREE.MathUtils.lerp(busDoor.position.x, busDwellGameHours > 0 ? -1.72 : -1.15, 0.08);
+        if (busClockActive && busDwellGameHours <= 0) {
+          bus.traverse((part) => {
+            if (part instanceof THREE.Mesh && part.name === "busWheel") {
+              part.rotation.x += busDirection * 16.67 * dt / 0.68;
+            }
+          });
+        }
       }
       engine.busPassengers.forEach((passenger, passengerIndex) => {
         if (passenger.state !== "boarding" && passenger.state !== "exiting") return;
