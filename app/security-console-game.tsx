@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "network" | "world" | "dialogue" | "tablet" | "map" | "pause" | "tariff" | "office";
+type GameMode = "intro" | "network" | "world" | "dialogue" | "tablet" | "map" | "pause" | "tariff" | "office" | "station" | "transit";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
@@ -199,6 +199,26 @@ type TrafficVehicle = {
   minX: number;
   maxX: number;
 };
+
+type BusStopSpec = {
+  id: "pervorechenskoe" | "highway" | "dinskaya";
+  name: string;
+  x: number;
+  z: number;
+};
+
+type StationService =
+  | "fuel10"
+  | "fuel20"
+  | "fuelFull"
+  | "wash"
+  | "oil"
+  | "tires"
+  | "coffee"
+  | "snack"
+  | "battery"
+  | "map"
+  | "leaflets";
 
 type Outfit = {
   id: OutfitId;
@@ -472,9 +492,24 @@ const WORLD_KEY_POINTS = [
   { id: "industrial-office", label: "Промышленный филиал", short: "О", x: 2700, z: -34, kind: "office" },
   { id: "warehouse", label: "Складской комплекс", short: "С", x: 2745, z: 42, kind: "service" },
   { id: "bank", label: "Банк", short: "Б", x: 3970, z: 26, kind: "service" },
-  { id: "gas", label: "АЗС", short: "Т", x: 2860, z: -18, kind: "service" },
+  { id: "gas-pervorechenskoe", label: "АЗС «Первореченская»", short: "АЗС", x: 250, z: -34, kind: "service" },
+  { id: "gas-dinskaya", label: "АЗС «Динская»", short: "АЗС", x: 3750, z: 34, kind: "service" },
+  { id: "bus-pervorechenskoe", label: "Остановка «Первореченское»", short: "А", x: 125, z: -18, kind: "transit" },
+  { id: "bus-highway", label: "Остановка «Трасса»", short: "А", x: 2000, z: -18, kind: "transit" },
+  { id: "bus-dinskaya", label: "Остановка «Динская»", short: "А", x: 3875, z: -18, kind: "transit" },
   { id: "river", label: "Река Кочеты", short: "Р", x: 0, z: 180, kind: "nature" },
   { id: "dinskaya", label: "Центр станицы Динской", short: "Д", x: 4000, z: -24, kind: "village" },
+] as const;
+
+const BUS_STOPS: BusStopSpec[] = [
+  { id: "pervorechenskoe", name: "село Первореченское", x: 125, z: -18 },
+  { id: "highway", name: "Трасса · промежуточная", x: 2000, z: -18 },
+  { id: "dinskaya", name: "ст. Динская", x: 3875, z: -18 },
+];
+
+const GAS_STATIONS = [
+  { id: "pervorechenskoe", name: "АЗС «Первореченская»", x: 250, z: -34 },
+  { id: "dinskaya", name: "АЗС «Динская»", x: 3750, z: 34 },
 ] as const;
 
 const OUTFITS: Outfit[] = [
@@ -804,10 +839,10 @@ function makeTree(scene: THREE.Object3D, x: number, z: number, scale = 1) {
 
 function makeFieldVegetation(scene: THREE.Object3D) {
   const dummy = new THREE.Object3D();
-  const grassGeometry = new THREE.ConeGeometry(0.16, 0.75, 4);
-  const grass = new THREE.InstancedMesh(grassGeometry, mat(0x6f984f), 1800);
+  const grassGeometry = new THREE.ConeGeometry(0.18, 0.88, 4);
+  const grass = new THREE.InstancedMesh(grassGeometry, mat(0x4f9f43), 3000);
   grass.receiveShadow = true;
-  for (let i = 0; i < 1800; i++) {
+  for (let i = 0; i < 3000; i++) {
     const x = -175 + ((i * 73) % 4350);
     const side = i % 2 === 0 ? -1 : 1;
     const z = side * (16 + ((i * 47) % 172));
@@ -824,11 +859,11 @@ function makeFieldVegetation(scene: THREE.Object3D) {
 
   const trunkGeometry = new THREE.CylinderGeometry(0.3, 0.46, 2.8, 6);
   const crownGeometry = new THREE.IcosahedronGeometry(1.85, 0);
-  const trunks = new THREE.InstancedMesh(trunkGeometry, mat(0x74583e), 240);
-  const crowns = new THREE.InstancedMesh(crownGeometry, mat(0x5f8951), 240);
+  const trunks = new THREE.InstancedMesh(trunkGeometry, mat(0x74583e), 380);
+  const crowns = new THREE.InstancedMesh(crownGeometry, mat(0x43823d), 380);
   trunks.castShadow = true;
   crowns.castShadow = true;
-  for (let i = 0; i < 240; i++) {
+  for (let i = 0; i < 380; i++) {
     const x = -160 + ((i * 83) % 4320);
     const side = i % 2 === 0 ? -1 : 1;
     const distance = 28 + ((i * 41) % (side > 0 ? 115 : 145));
@@ -945,7 +980,7 @@ function makePerson(color: number) {
   group.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;
   });
-  group.scale.setScalar(0.72);
+  group.scale.setScalar(0.6);
   return group;
 }
 
@@ -1043,7 +1078,7 @@ function makeHero() {
       object.receiveShadow = true;
     }
   });
-  hero.scale.setScalar(0.72);
+  hero.scale.setScalar(0.6);
   return hero;
 }
 
@@ -1189,11 +1224,151 @@ function makeCar(bodyColor = 0xc85f4c, withDriver = false) {
   return group;
 }
 
+function makeTextBoard(text: string, width = 512, height = 128, background = "#f5f0df", foreground = "#28463b") {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.fillStyle = background;
+    context.fillRect(0, 0, width, height);
+    context.fillStyle = foreground;
+    context.font = `bold ${text.length > 22 ? 25 : 43}px Arial`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(text, width / 2, height / 2);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function makeBusStop(stop: BusStopSpec) {
+  const group = new THREE.Group();
+  group.name = `busStop-${stop.id}`;
+  const shelter = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.28, 3.2), mat(0x5f8577));
+  shelter.position.y = 3.4;
+  const back = new THREE.Mesh(
+    new THREE.BoxGeometry(6.8, 3.2, 0.16),
+    new THREE.MeshStandardMaterial({ color: 0x9bc9c4, transparent: true, opacity: 0.62, roughness: 0.3 }),
+  );
+  back.position.set(0, 1.75, 1.48);
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.28, 0.9), mat(0x916b45));
+  bench.position.set(0, 0.9, 0.72);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 1.25), new THREE.MeshBasicMaterial({ map: makeTextBoard(`АВТОБУС · ${stop.name}`), side: THREE.DoubleSide }));
+  sign.position.set(0, 2.65, 1.37);
+  sign.rotation.y = Math.PI;
+  const routePlate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.14), mat(0xf0b44e));
+  routePlate.position.set(2.85, 2.0, -1.55);
+  for (const x of [-3.15, 3.15]) {
+    const support = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.4, 0.18), mat(0x314842));
+    support.position.set(x, 1.7, 1.35);
+    group.add(support);
+  }
+  group.add(shelter, back, bench, sign, routePlate);
+  group.position.set(stop.x, 0, stop.z);
+  group.traverse((part) => {
+    if (part instanceof THREE.Mesh) {
+      part.castShadow = true;
+      part.receiveShadow = true;
+    }
+  });
+  return group;
+}
+
+function makeBus() {
+  const group = new THREE.Group();
+  group.name = "publicBus";
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3.5, 2.8, 9.2), mat(0xd7ad55));
+  body.position.y = 1.8;
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(3.65, 0.35, 9.35), mat(0xf0e7cf));
+  roof.position.y = 3.35;
+  const windowMaterial = new THREE.MeshStandardMaterial({ color: 0x8fbfc5, transparent: true, opacity: 0.68, roughness: 0.25 });
+  for (const z of [-3.1, -1.2, 0.7, 2.6]) {
+    for (const x of [-1.77, 1.77]) {
+      const window = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.15, 1.35), windowMaterial);
+      window.position.set(x, 2.25, z);
+      group.add(window);
+    }
+  }
+  const route = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.72), new THREE.MeshBasicMaterial({ map: makeTextBoard("ДИНСКАЯ — ПЕРВОРЕЧЕНСКОЕ"), side: THREE.DoubleSide }));
+  route.position.set(0, 2.62, 4.62);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.25, 2.15, 0.12), mat(0x426b68));
+  door.position.set(1.15, 1.48, 4.66);
+  door.name = "busDoor";
+  const driver = makePerson(0x4e6f5d);
+  driver.scale.setScalar(0.42);
+  driver.position.set(-0.85, 0.6, 2.8);
+  driver.name = "busDriver";
+  group.add(body, roof, route, door, driver);
+  for (const x of [-1.78, 1.78]) {
+    for (const z of [-3.1, 3.1]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.68, 0.4, 10), mat(0x252b29));
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 0.72, z);
+      wheel.name = "busWheel";
+      group.add(wheel);
+    }
+  }
+  group.traverse((part) => {
+    if (part instanceof THREE.Mesh) part.castShadow = true;
+  });
+  return group;
+}
+
+function makeGasStation(name: string, x: number, z: number) {
+  const group = new THREE.Group();
+  group.name = name;
+  const lot = new THREE.Mesh(new THREE.BoxGeometry(38, 0.18, 28), mat(0x8f928d));
+  lot.position.y = 0.09;
+  lot.receiveShadow = true;
+  const shop = new THREE.Mesh(new THREE.BoxGeometry(12, 5.2, 8), mat(0xe4d2a2));
+  shop.position.set(8, 2.6, 6);
+  const shopWindowMaterial = new THREE.MeshStandardMaterial({ color: 0xaed9db, emissive: 0xffbd66, emissiveIntensity: 0.08, roughness: 0.32 });
+  shopWindowMaterial.name = "stationWindowMaterial";
+  const shopWindow = new THREE.Mesh(new THREE.BoxGeometry(6.5, 2.2, 0.15), shopWindowMaterial);
+  shopWindow.position.set(8, 2.8, 1.93);
+  shopWindow.name = "stationWindow";
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(17, 0.7, 9), mat(0x4d8069));
+  canopy.position.set(-6, 5.2, -3);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(9.5, 1.4), new THREE.MeshBasicMaterial({ map: makeTextBoard(name, 640, 120, "#315c45", "#d8f46d"), side: THREE.DoubleSide }));
+  sign.position.set(8, 5.0, 1.85);
+  for (const columnX of [-12, 0]) {
+    const support = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 5, 7), mat(0xe7e3d8));
+    support.position.set(columnX, 2.5, -3);
+    group.add(support);
+    const pump = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.25, 1.15), mat(0xf3eee1));
+    pump.position.set(columnX, 1.15, -3);
+    const display = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.08), mat(0x263d37));
+    display.position.set(columnX, 1.55, -2.39);
+    const lampMaterial = new THREE.MeshStandardMaterial({ color: 0xffe5a4, emissive: 0xffc55c, emissiveIntensity: 0.12 });
+    lampMaterial.name = "stationLampMaterial";
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.16, 1.1), lampMaterial);
+    lamp.position.set(columnX, 4.75, -3);
+    lamp.name = "stationLamp";
+    group.add(pump, display, lamp);
+  }
+  const wash = new THREE.Mesh(new THREE.BoxGeometry(8, 5, 8), mat(0x789b96));
+  wash.position.set(12, 2.5, -7);
+  const washDoor = new THREE.Mesh(new THREE.BoxGeometry(5.8, 3.7, 0.18), mat(0x5e7778));
+  washDoor.position.set(12, 2.0, -2.92);
+  group.add(lot, shop, shopWindow, canopy, sign, wash, washDoor);
+  group.position.set(x, 0, z);
+  group.traverse((part) => {
+    if (part instanceof THREE.Mesh) {
+      part.castShadow = true;
+      part.receiveShadow = true;
+    }
+  });
+  return group;
+}
+
 export default function SecurityConsoleGame() {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<{
     player?: THREE.Group;
     car?: THREE.Group;
+    bus?: THREE.Group;
     scene?: THREE.Scene;
     camera?: THREE.PerspectiveCamera;
     renderer?: THREE.WebGLRenderer;
@@ -1256,11 +1431,20 @@ export default function SecurityConsoleGame() {
   const [energy, setEnergy] = useState(initialSave.energy ?? 100);
   const energyRef = useRef(initialSave.energy ?? 100);
   const [money, setMoney] = useState(initialSave.money);
+  const moneyRef = useRef(initialSave.money);
   const [reputation, setReputation] = useState(initialSave.reputation);
   const [gameTime, setGameTime] = useState(initialSave.gameTime ?? 8.25);
   const [driving, setDriving] = useState(false);
   const [nearCar, setNearCar] = useState(false);
   const [nearest, setNearest] = useState<Resident | null>(null);
+  const [nearStationId, setNearStationId] = useState<string | null>(null);
+  const [nearBusStopId, setNearBusStopId] = useState<BusStopSpec["id"] | null>(null);
+  const [stationMenu, setStationMenu] = useState<(typeof GAS_STATIONS)[number]["id"] | null>(null);
+  const [transitMenu, setTransitMenu] = useState<BusStopSpec["id"] | null>(null);
+  const [serviceBusy, setServiceBusy] = useState("");
+  const [busPos, setBusPos] = useState({ x: BUS_STOPS[0].x, z: -3.5 });
+  const [busEtaMinutes, setBusEtaMinutes] = useState(0);
+  const [busReadyAtStop, setBusReadyAtStop] = useState(false);
   const [activeNpcId, setActiveNpcId] = useState<number | null>(null);
   const [residents, setResidents] = useState<Resident[]>(() => residentsFromSave(initialSave));
   const residentsRef = useRef<Resident[]>(residents);
@@ -1357,6 +1541,10 @@ export default function SecurityConsoleGame() {
   const [minimapRotates, setMinimapRotates] = useState(true);
   const [selectedMapObject, setSelectedMapObject] = useState<string | null>(null);
   const [mapWaypoint, setMapWaypoint] = useState<{ x: number; z: number; label: string } | null>(null);
+
+  useEffect(() => {
+    moneyRef.current = money;
+  }, [money]);
 
   const signedCount = residents.filter((r) => r.signed).length;
   const totalContracts = signedCount + extendedContracts.length;
@@ -1880,7 +2068,7 @@ export default function SecurityConsoleGame() {
     engine.walkers = [];
     engine.traffic = [];
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 420), mat(0x8fb277));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 420), mat(0x78ad5d));
     ground.rotation.x = -Math.PI / 2;
     ground.position.x = 1950;
     ground.receiveShadow = true;
@@ -1917,13 +2105,13 @@ export default function SecurityConsoleGame() {
     scene.add(river);
 
     // Trees stay on dry land; none are generated inside the river corridor.
-    for (let i = 0; i < 96; i++) {
-      const villageX = i < 48 ? 0 : 4000;
+    for (let i = 0; i < 160; i++) {
+      const villageX = i < 80 ? 0 : 4000;
       const localX = -165 + ((i * 37) % 330);
       const z = -168 - ((i * 13) % 20);
       makeTree(scene, villageX + localX, z, 0.72 + ((i * 9) % 7) / 14);
     }
-    for (let x = 260; x < 3740; x += 120) {
+    for (let x = 260; x < 3740; x += 80) {
       makeTree(scene, x, -27, 0.72);
       makeTree(scene, x + 48, 29, 0.8);
     }
@@ -1989,25 +2177,6 @@ export default function SecurityConsoleGame() {
     box(scene, [6.4, 0.3, 0.3], [-20, 3.3, 30], 0x49685a);
     box(scene, [2.8, 0.25, 1.15], [-20, 1.05, 29], 0xe38b58, 0.12);
 
-    for (let x = -88; x <= 88; x += 22) {
-      const lamp = new THREE.Group();
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 4.6, 6), mat(0x374943));
-      pole.position.y = 2.3;
-      const glowMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffd88a,
-        emissive: 0xffbf5a,
-        emissiveIntensity: 0.1,
-        roughness: 0.6,
-        flatShading: true,
-      });
-      lampMaterials.push(glowMaterial);
-      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.34, 7, 5), glowMaterial);
-      glow.position.y = 4.7;
-      lamp.add(pole, glow);
-      lamp.position.set(x, 0, 7.6 - x * 0.035);
-      scene.add(lamp);
-    }
-
     // Utility corridor: poles every 60 m, a street lamp on every second pole,
     // and three gently sagging wires between adjacent supports.
     const wireMaterial = new THREE.LineBasicMaterial({ color: 0x273b36, transparent: true, opacity: 0.78 });
@@ -2055,6 +2224,37 @@ export default function SecurityConsoleGame() {
         scene.add(wire);
       }
     }
+
+    BUS_STOPS.forEach((stop) => {
+      const southStop = makeBusStop(stop);
+      scene.add(southStop);
+      const northStop = makeBusStop({ ...stop, z: 18 });
+      northStop.rotation.y = Math.PI;
+      scene.add(northStop);
+      engine.colliders.push(
+        { x: stop.x, z: -18, halfX: 3.6, halfZ: 1.8, kind: "landmark" },
+        { x: stop.x, z: 18, halfX: 3.6, halfZ: 1.8, kind: "landmark" },
+      );
+    });
+
+    GAS_STATIONS.forEach((station, stationIndex) => {
+      const gasStation = makeGasStation(station.name, station.x, station.z);
+      gasStation.rotation.y = station.z > 0 ? Math.PI : 0;
+      gasStation.traverse((part) => {
+        if (!(part instanceof THREE.Mesh) || !(part.material instanceof THREE.MeshStandardMaterial)) return;
+        if (part.name === "stationWindow") windowMaterials.push(part.material);
+        if (part.name === "stationLamp") lampMaterials.push(part.material);
+      });
+      scene.add(gasStation);
+      engine.colliders.push(
+        { x: station.x + (station.z > 0 ? -8 : 8), z: station.z + (station.z > 0 ? -6 : 6), halfX: 6.2, halfZ: 4.2, kind: "landmark" },
+        { x: station.x + (station.z > 0 ? -12 : 12), z: station.z + (station.z > 0 ? 7 : -7), halfX: 4.2, halfZ: 4.2, kind: "landmark" },
+      );
+      const cashier = makePerson(stationIndex === 0 ? 0x4f795f : 0x8a645d);
+      cashier.position.set(station.x + (station.z > 0 ? -2 : 2), 0, station.z + (station.z > 0 ? -11 : 11));
+      cashier.rotation.y = station.z > 0 ? Math.PI : 0;
+      scene.add(cashier);
+    });
 
     box(scene, [18, 7, 13], [92, 3.5, -18], 0x446f59);
     box(scene, [8, 1.1, 0.4], [92, 6.2, -11.3], 0xcce86b);
@@ -2216,6 +2416,16 @@ export default function SecurityConsoleGame() {
       });
     }
 
+    const bus = makeBus();
+    bus.position.set(BUS_STOPS[0].x, 0, -3.8);
+    bus.rotation.y = Math.PI / 2;
+    scene.add(bus);
+    engine.bus = bus;
+    let busDirection: 1 | -1 = 1;
+    let busCurrentStop = 0;
+    let busNextStop = 1;
+    let busDwellSeconds = 10;
+
     let last = performance.now();
     let uiTick = 0;
     let statisticsTick = 0;
@@ -2273,9 +2483,40 @@ export default function SecurityConsoleGame() {
         setActiveNpcId(null);
         return;
       }
+      if (e.code === "Escape" && (modeRef.current === "station" || modeRef.current === "transit")) {
+        engine.keys.clear();
+        setStationMenu(null);
+        setTransitMenu(null);
+        setMode("world");
+        return;
+      }
       if (e.code === "KeyE" && modeRef.current === "world" && !e.repeat) {
         const focus = engine.driving ? engine.car : engine.player;
         if (!focus) return;
+        const closestStation = GAS_STATIONS.reduce((closest, station) =>
+          Math.hypot(focus.position.x - station.x, focus.position.z - station.z) <
+          Math.hypot(focus.position.x - closest.x, focus.position.z - closest.z)
+            ? station
+            : closest,
+        );
+        if (Math.hypot(focus.position.x - closestStation.x, focus.position.z - closestStation.z) < 24 && (!engine.driving || Math.abs(engine.carSpeed) < 1.2)) {
+          engine.keys.clear();
+          setStationMenu(closestStation.id);
+          setMode("station");
+          return;
+        }
+        const closestStop = BUS_STOPS.reduce((closest, stop) =>
+          Math.hypot(focus.position.x - stop.x, Math.abs(focus.position.z) - 18) <
+          Math.hypot(focus.position.x - closest.x, Math.abs(focus.position.z) - 18)
+            ? stop
+            : closest,
+        );
+        if (!engine.driving && Math.hypot(focus.position.x - closestStop.x, Math.abs(focus.position.z) - 18) < 9) {
+          engine.keys.clear();
+          setTransitMenu(closestStop.id);
+          setMode("transit");
+          return;
+        }
         if (!engine.driving && engine.car && focus.position.distanceTo(engine.car.position) < 5.2) {
           engine.driving = true;
           engine.yaw = car.rotation.y + Math.PI;
@@ -2386,6 +2627,7 @@ export default function SecurityConsoleGame() {
           return true;
         }
       }
+      if (bus.visible && Math.hypot(x - bus.position.x, z - bus.position.z) < radius + 4.2) return true;
       if (includeCar && Math.hypot(x - car.position.x, z - car.position.z) < radius + 2.25) return true;
       return false;
     };
@@ -2625,6 +2867,36 @@ export default function SecurityConsoleGame() {
           }
         });
       });
+      const busOperating = engine.time >= 6 && engine.time < 23;
+      bus.visible = busOperating;
+      if (busOperating) {
+        if (busDwellSeconds > 0) {
+          busDwellSeconds = Math.max(0, busDwellSeconds - dt);
+        } else {
+          const targetX = BUS_STOPS[busNextStop].x;
+          const remaining = targetX - bus.position.x;
+          const busSpeed = 16.67;
+          if (Math.abs(remaining) <= busSpeed * dt) {
+            bus.position.x = targetX;
+            busCurrentStop = busNextStop;
+            busDwellSeconds = 10;
+            if (busCurrentStop === BUS_STOPS.length - 1) busDirection = -1;
+            if (busCurrentStop === 0) busDirection = 1;
+            busNextStop = busCurrentStop + busDirection;
+          } else {
+            bus.position.x += Math.sign(remaining) * busSpeed * dt;
+          }
+        }
+        bus.position.z = busDirection > 0 ? -3.8 : 3.8;
+        bus.rotation.y = busDirection > 0 ? Math.PI / 2 : -Math.PI / 2;
+        const busDoor = bus.getObjectByName("busDoor");
+        if (busDoor) busDoor.position.x = THREE.MathUtils.lerp(busDoor.position.x, busDwellSeconds > 0 ? 1.72 : 1.15, 0.08);
+        bus.traverse((part) => {
+          if (part instanceof THREE.Mesh && part.name === "busWheel") {
+            part.rotation.x += busDirection * 16.67 * dt / 0.68;
+          }
+        });
+      }
 
       if (canMove && !engine.driving) {
         let closest: Resident | null = null;
@@ -2671,6 +2943,28 @@ export default function SecurityConsoleGame() {
           surface: engine.surface,
           wear: Math.round(engine.wear),
         });
+        const nearbyStop = BUS_STOPS.reduce((closest, stop) =>
+          Math.hypot(focus.position.x - stop.x, Math.abs(focus.position.z) - 18) <
+          Math.hypot(focus.position.x - closest.x, Math.abs(focus.position.z) - 18)
+            ? stop
+            : closest,
+        );
+        const stopDistance = Math.hypot(focus.position.x - nearbyStop.x, Math.abs(focus.position.z) - 18);
+        setNearBusStopId(stopDistance < 12 ? nearbyStop.id : null);
+        const nearbyStation = GAS_STATIONS.reduce((closest, station) =>
+          Math.hypot(focus.position.x - station.x, focus.position.z - station.z) <
+          Math.hypot(focus.position.x - closest.x, focus.position.z - closest.z)
+            ? station
+            : closest,
+        );
+        setNearStationId(Math.hypot(focus.position.x - nearbyStation.x, focus.position.z - nearbyStation.z) < 28 ? nearbyStation.id : null);
+        setBusPos({ x: bus.position.x, z: bus.position.z });
+        setBusReadyAtStop(busOperating && busDwellSeconds > 0 && Math.abs(bus.position.x - nearbyStop.x) < 20);
+        setBusEtaMinutes(
+          busOperating
+            ? Math.max(0, Math.ceil(Math.abs(bus.position.x - nearbyStop.x) / 16.67 / 60))
+            : -1,
+        );
         setLocationName(
           focus.position.x < 450
             ? "село Первореченское"
@@ -3182,6 +3476,103 @@ export default function SecurityConsoleGame() {
     flash(`${action === "fuel" ? "Бак заправлен" : action === "wash" ? "Машина вымыта" : action === "repair" ? "Автомобиль отремонтирован" : action === "tires" ? "Шины заменены" : "Мигалка и сирена установлены"} · −${price.toLocaleString("ru-RU")} ₽`);
   };
 
+  const buyStationService = (service: StationService) => {
+    if (serviceBusy) return;
+    const currentFuel = engineRef.current.fuel;
+    const fuelLiters =
+      service === "fuel10"
+        ? Math.min(10, FUEL_TANK_LITERS - currentFuel)
+        : service === "fuel20"
+          ? Math.min(20, FUEL_TANK_LITERS - currentFuel)
+          : service === "fuelFull"
+            ? Math.max(0, FUEL_TANK_LITERS - currentFuel)
+            : 0;
+    const prices: Record<StationService, number> = {
+      fuel10: Math.round(fuelLiters * 50),
+      fuel20: Math.round(fuelLiters * 50),
+      fuelFull: Math.round(fuelLiters * 50),
+      wash: 200,
+      oil: 100,
+      tires: 50,
+      coffee: 50,
+      snack: 30,
+      battery: 100,
+      map: 250,
+      leaflets: 500,
+    };
+    const price = prices[service];
+    if (price <= 0 && service.startsWith("fuel")) {
+      flash("Бак уже полный");
+      return;
+    }
+    if (moneyRef.current < price) {
+      flash(`Не хватает ${(price - moneyRef.current).toLocaleString("ru-RU")} ₽`);
+      return;
+    }
+    const nextMoney = moneyRef.current - price;
+    moneyRef.current = nextMoney;
+    setMoney(nextMoney);
+    const animated = service.startsWith("fuel") || service === "wash";
+    setServiceBusy(service === "wash" ? "Автомойка работает…" : service.startsWith("fuel") ? "Заправляем автомобиль…" : "Обслуживание…");
+    window.setTimeout(() => {
+      let nextReputation = reputation;
+      if (service.startsWith("fuel")) {
+        engineRef.current.fuel = clamp(engineRef.current.fuel + fuelLiters, 0, FUEL_TANK_LITERS);
+        setCarTelemetry((value) => ({ ...value, fuel: Math.round(engineRef.current.fuel * 100) / 100 }));
+      }
+      if (service === "wash") {
+        carCleanRef.current = true;
+        setCarClean(true);
+      }
+      if (service === "oil") {
+        engineRef.current.wear = clamp(engineRef.current.wear - 2, 0, 100);
+        setCarTelemetry((value) => ({ ...value, wear: Math.round(engineRef.current.wear) }));
+      }
+      if (service === "tires") {
+        seasonalTiresRef.current = true;
+        setSeasonalTires(true);
+      }
+      if (service === "coffee" || service === "snack") {
+        energyRef.current = clamp(energyRef.current + (service === "coffee" ? 15 : 5), 0, 100);
+        setEnergy(Math.round(energyRef.current));
+      }
+      if (service === "battery") setEquipment((value) => value + 1);
+      if (service === "map") {
+        setMapLayers((value) => ({ ...value, points: true }));
+        setSelectedMapObject("Карта местности куплена: тропинки и сервисные точки отмечены.");
+      }
+      if (service === "leaflets") {
+        nextReputation = clamp(reputation + 2, 0, 100);
+        setReputation(nextReputation);
+      }
+      persist(residentsRef.current, nextMoney, nextReputation);
+      setServiceBusy("");
+      flash(`${animated ? "Готово" : "Покупка оформлена"} · −${price.toLocaleString("ru-RU")} ₽`);
+    }, animated ? 3200 : 500);
+  };
+
+  const rideBusTo = (destinationId: BusStopSpec["id"]) => {
+    if (!transitMenu || !busReadyAtStop) return;
+    const source = BUS_STOPS.find((stop) => stop.id === transitMenu);
+    const destination = BUS_STOPS.find((stop) => stop.id === destinationId);
+    if (!source || !destination || source.id === destination.id || !engineRef.current.player) return;
+    const intercity = (source.id === "pervorechenskoe" && destination.id === "dinskaya") || (source.id === "dinskaya" && destination.id === "pervorechenskoe");
+    const fare = intercity ? 150 : 50;
+    if (moneyRef.current < fare) {
+      flash(`Для поездки нужно ${fare} ₽`);
+      return;
+    }
+    const nextMoney = moneyRef.current - fare;
+    moneyRef.current = nextMoney;
+    setMoney(nextMoney);
+    engineRef.current.player.position.set(destination.x, 0, destination.z + (destination.z > 0 ? 5 : -5));
+    setPlayerPos({ x: destination.x, z: destination.z });
+    setTransitMenu(null);
+    setMode("world");
+    persist(residentsRef.current, nextMoney, reputation);
+    flash(`Автобус прибыл: ${destination.name} · −${fare} ₽`);
+  };
+
   const buyStoreItem = (kind: "batteries" | "food" | "tools" | "book" | "leaflets" | "billboard" | "radio") => {
     const prices = { batteries: 1000, food: 100, tools: 3000, book: 2000, leaflets: 500, billboard: 10000, radio: 3000 };
     const price = prices[kind];
@@ -3484,6 +3875,7 @@ export default function SecurityConsoleGame() {
             })}
             {networkPlayers.filter((player) => player.id !== profile.id && Math.hypot(player.x - playerPos.x, player.z - playerPos.z) <= 80).map((player) => <span key={`coop-mini-${player.id}`} className="map-coop-player" title={player.name} style={{ left: mapPos(player.x - playerPos.x, 80), top: mapPos(playerPos.z - player.z, 80) }}>{player.name.slice(0, 1)}</span>)}
             {mapWaypoint && waypointDistance !== null && waypointDistance <= 80 && <span className="map-waypoint-mini" title={mapWaypoint.label} style={{ left: mapPos(mapWaypoint.x - playerPos.x, 80), top: mapPos(playerPos.z - mapWaypoint.z, 80) }}>◎</span>}
+            {Math.hypot(busPos.x - playerPos.x, busPos.z - playerPos.z) <= 80 && <span className="map-bus" title="Рейсовый автобус" style={{ left: mapPos(busPos.x - playerPos.x, 80), top: mapPos(playerPos.z - busPos.z, 80) }}>А</span>}
             </div>
             {quests.filter((quest) => quest.tracked && quest.status === "active").map((progress) => {
               const definition = QUESTS.find((quest) => quest.id === progress.id);
@@ -3498,16 +3890,92 @@ export default function SecurityConsoleGame() {
             <span className="map-player" style={{ left: "50%", top: "50%", transform: `translate(-50%, -50%) rotate(${minimapRotates ? 0 : engineRef.current.yaw}rad)` }} />
             {mapWaypoint && waypointDistance !== null && <span className="minimap-distance">◎ {formatDistance(waypointDistance)}</span>}
           </div>
-          {mode === "world" && (nearest || (driving && carTelemetry.speed < 5)) && (
+          {mode === "world" && nearStationId && (!driving || carTelemetry.speed < 5) && (
+            <div className="interaction-prompt">
+              <span className="key">E</span>
+              <span>АЗС · заправка и сервис</span>
+            </div>
+          )}
+          {mode === "world" && !nearStationId && !driving && nearBusStopId && (
+            <div className="interaction-prompt">
+              <span className="key">E</span>
+              <span>{busEtaMinutes < 0 ? "Автобусы с 06:00" : busReadyAtStop ? "Сесть в автобус" : `Автобус примерно через ${busEtaMinutes} мин`}</span>
+            </div>
+          )}
+          {mode === "world" && !nearStationId && !nearBusStopId && (nearest || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>{driving ? "Выйти из машины" : `Поговорить · ${nearest?.name}`}</span>
             </div>
           )}
-          {mode === "world" && !driving && nearCar && !nearest && (
+          {mode === "world" && !driving && nearCar && !nearest && !nearStationId && !nearBusStopId && (
             <div className="interaction-prompt"><span className="key">E</span><span>Сесть в {VEHICLE_BY_ID[currentVehicle].name.toLowerCase()}</span></div>
           )}
         </div>
+      )}
+
+      {mode === "station" && stationMenu && (
+        <section className="overlay service-overlay">
+          <div className="service-modal">
+            <header>
+              <div><small>Круглосуточная автоматическая станция</small><h1>{GAS_STATIONS.find((station) => station.id === stationMenu)?.name}</h1></div>
+              <button onClick={() => { setStationMenu(null); setMode("world"); }}>×</button>
+            </header>
+            <div className="station-status">
+              <span>Бак <b>{carTelemetry.fuel.toFixed(2)} / {FUEL_TANK_LITERS} л</b></span>
+              <span>Баланс <b>{money.toLocaleString("ru-RU")} ₽</b></span>
+              <span>Магазин <b>{gameTime >= 7 && gameTime < 23 ? "открыт до 23:00" : "закрыт · с 07:00"}</b></span>
+            </div>
+            {serviceBusy && <div className="service-progress"><span>{serviceBusy}</span></div>}
+            <div className="station-sections">
+              <article>
+                <h2>⛽ Топливо · 50 ₽/л</h2>
+                <p>Бак рассчитан на 40 литров. Оплата списывается перед заправкой.</p>
+                <div><button onClick={() => buyStationService("fuel10")}>10 литров</button><button onClick={() => buyStationService("fuel20")}>20 литров</button><button onClick={() => buyStationService("fuelFull")}>Полный бак</button></div>
+              </article>
+              <article>
+                <h2>Сервис и мойка</h2>
+                <p>Мойка повышает впечатление клиентов, обслуживание уменьшает износ.</p>
+                <div><button onClick={() => buyStationService("wash")}>Мойка · 200 ₽</button><button onClick={() => buyStationService("oil")}>Масло · 100 ₽</button><button onClick={() => buyStationService("tires")}>Шины · 50 ₽</button></div>
+              </article>
+              <article className={gameTime >= 7 && gameTime < 23 ? "" : "closed"}>
+                <h2>Магазин и кафе</h2>
+                <p>Кофе, снеки, батарейки, карта района и рекламные буклеты.</p>
+                <div>
+                  <button disabled={gameTime < 7 || gameTime >= 23} onClick={() => buyStationService("coffee")}>Кофе · 50 ₽</button>
+                  <button disabled={gameTime < 7 || gameTime >= 23} onClick={() => buyStationService("snack")}>Снек · 30 ₽</button>
+                  <button disabled={gameTime < 7 || gameTime >= 23} onClick={() => buyStationService("battery")}>Батарейка · 100 ₽</button>
+                  <button disabled={gameTime < 7 || gameTime >= 23} onClick={() => buyStationService("map")}>Карта · 250 ₽</button>
+                  <button disabled={gameTime < 7 || gameTime >= 23} onClick={() => buyStationService("leaflets")}>Буклеты · 500 ₽</button>
+                </div>
+              </article>
+            </div>
+            <footer><span>Esc · вернуться к автомобилю</span><button onClick={() => { setStationMenu(null); setMode("world"); }}>Закрыть</button></footer>
+          </div>
+        </section>
+      )}
+
+      {mode === "transit" && transitMenu && (
+        <section className="overlay service-overlay transit-overlay">
+          <div className="service-modal transit-modal">
+            <header>
+              <div><small>Маршрут №21 · 06:00–23:00</small><h1>Динская — Первореченское</h1></div>
+              <button onClick={() => { setTransitMenu(null); setMode("world"); }}>×</button>
+            </header>
+            <div className={`bus-arrival ${busReadyAtStop ? "ready" : ""}`}>
+              <b>{busEtaMinutes < 0 ? "Движение автобусов завершено" : busReadyAtStop ? "Автобус на остановке · двери открыты" : `Ближайший автобус примерно через ${busEtaMinutes} мин`}</b>
+              <span>Оплата при посадке: 50 ₽ до промежуточной остановки, 150 ₽ между населёнными пунктами.</span>
+            </div>
+            <div className="bus-route-list">
+              {BUS_STOPS.map((stop, index) => (
+                <button key={stop.id} disabled={!busReadyAtStop || stop.id === transitMenu} onClick={() => rideBusTo(stop.id)}>
+                  <i>{index + 1}</i><span><b>{stop.name}</b><small>{stop.id === transitMenu ? "Вы здесь" : "Выбрать остановку"}</small></span>
+                </button>
+              ))}
+            </div>
+            <footer><span>Автобус движется по правой полосе со скоростью около 60 км/ч.</span><button onClick={() => { setTransitMenu(null); setMode("world"); }}>Не ехать</button></footer>
+          </div>
+        </section>
       )}
 
       {mode === "intro" && (
@@ -4016,6 +4484,7 @@ export default function SecurityConsoleGame() {
               {mapWaypoint && <span className="world-waypoint" title={mapWaypoint.label} style={{ left: worldMapX(mapWaypoint.x), top: worldMapZ(mapWaypoint.z) }}>◎</span>}
               {mapWaypoint && mapRouteStyle && <div className="world-route active" style={mapRouteStyle} />}
               {mapLayers.vehicles && <span className="world-car" title={VEHICLE_BY_ID[currentVehicle].name} style={{ left: worldMapX(carPos.x), top: worldMapZ(carPos.z) }}>◆</span>}
+              {mapLayers.vehicles && <span className="world-bus" title="Автобус №21 · Динская — Первореченское" style={{ left: worldMapX(busPos.x), top: worldMapZ(busPos.z) }}>А</span>}
               {networkPlayers.filter((player) => player.id !== profile.id).map((player) => <span className="world-coop-player" title={`${player.name} · ${player.role}`} key={`world-coop-${player.id}`} style={{ left: worldMapX(player.x), top: worldMapZ(player.z) }}>{player.name.slice(0, 1)}</span>)}
               <span className="world-player" title={profile.nickname} style={{ left: worldMapX(playerPos.x), top: worldMapZ(playerPos.z) }}>{profile.nickname.slice(0, 1).toUpperCase()}</span>
             </div>
@@ -4023,6 +4492,7 @@ export default function SecurityConsoleGame() {
               <h3>Легенда</h3>
               <div><i className="legend-player">А</i><span>Главный герой</span></div>
               <div><i className="legend-car">◆</i><span>Личный автомобиль</span></div>
+              <div><i className="legend-bus">А</i><span>Рейсовый автобус</span></div>
               <div><i className="legend-house" /><span>Потенциальный клиент</span></div>
               <div><i className="legend-house signed" /><span>Дом на охране</span></div>
               <div><i className="legend-road" /><span>Главный асфальт</span></div>
