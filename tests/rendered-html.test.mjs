@@ -118,7 +118,7 @@ test("resets statistics safely and renders liters, traffic, lights, and utility 
   assert.match(source, /const isResettingRef = useRef\(false\)/);
   assert.match(source, /if \(!isResettingRef\.current\) persist\(\)/);
   assert.match(source, /const FUEL_TANK_LITERS = 40/);
-  assert.match(source, /carFuel: 20/);
+  assert.match(source, /carFuel: 0/);
   assert.match(source, /Топливо \{carTelemetry\.fuel\.toFixed\(2\)\} л/);
   assert.match(source, /type TrafficVehicle/);
   assert.match(source, /makeCar\(trafficColors\[i % trafficColors\.length\], true\)/);
@@ -149,6 +149,41 @@ test("contains right-hand bus service, intermediate stop, greener vegetation, an
   assert.doesNotMatch(source, /for \(let x = -88; x <= 88; x \+= 22\)/);
   assert.match(styles, /\.service-modal/);
   assert.match(styles, /\.world-bus/);
+});
+
+test("starts without a personal car and animates stop passengers", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /ownedVehicles: \[\]/);
+  assert.match(source, /currentVehicle: null/);
+  assert.match(source, /quest_first_car/);
+  assert.match(source, /Алексей приехал в Первореченское рейсовым автобусом/);
+  assert.match(source, /const passengerColors/);
+  assert.match(source, /state: "waiting"/);
+  assert.match(source, /passenger\.state = "boarding"/);
+  assert.match(source, /passenger\.state = "exiting"/);
+  assert.match(source, /new THREE\.MeshBasicMaterial\(\{ map: makeTextBoard\(`АВТОБУС/);
+  assert.match(source, /side: THREE\.FrontSide/);
+  assert.match(styles, /\.empty-garage-panel/);
+});
+
+test("applies right-hand traffic rules, collision damage, and fines", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /wrongRightHandLane/);
+  assert.match(source, /В игре действует правостороннее движение/);
+  assert.match(source, /applyTrafficPenalty/);
+  assert.match(source, /Среднее ДТП/);
+  assert.match(source, /Серьёзное ДТП/);
+  assert.match(source, /Опасное ДТП с пешеходом/);
+  assert.match(source, /damageSpeedFactor/);
+  assert.match(styles, /\.traffic-incident/);
 });
 
 test("contains rotating daily challenges and cooperative room systems", async () => {

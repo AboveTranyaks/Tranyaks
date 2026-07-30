@@ -152,7 +152,7 @@ type SaveData = {
   openedBranches?: DistrictId[];
   staff?: StaffState;
   ownedVehicles?: VehicleId[];
-  currentVehicle?: VehicleId;
+  currentVehicle?: VehicleId | null;
   loan?: LoanState;
   businessMonth?: number;
   officeRented?: boolean;
@@ -198,6 +198,23 @@ type TrafficVehicle = {
   laneZ: number;
   minX: number;
   maxX: number;
+};
+
+type BusPassenger = {
+  mesh: THREE.Group;
+  stopIndex: number;
+  direction: 1 | -1;
+  targetStop: number;
+  state: "waiting" | "boarding" | "riding" | "exiting";
+  progress: number;
+  start: THREE.Vector3;
+  end: THREE.Vector3;
+};
+
+type TrafficIncident = {
+  title: string;
+  detail: string;
+  fine: number;
 };
 
 type BusStopSpec = {
@@ -364,12 +381,22 @@ const STAFF_ROLES = [
 
 const QUESTS = [
   {
+    id: "quest_first_car",
+    category: "main" as QuestCategory,
+    icon: "★",
+    title: "Дела на колёсах",
+    short: "Накопить 20 000 ₽ и купить первый автомобиль.",
+    full: "Алексей приехал в Первореченское рейсовым автобусом. Пока личной машины нет, нужно ходить пешком, пользоваться маршрутом №21 и накопить на первые колёса.",
+    reward: "Достижение «Первые колёса» · доступ к заданиям по вождению",
+    target: { x: 1390, z: 34, label: "Автосалон" },
+  },
+  {
     id: "quest_open_office",
     category: "main" as QuestCategory,
     icon: "★",
     title: "Открыть своё дело",
     short: "Набрать первые договоры и арендовать центральный офис.",
-    full: "Алексей вернулся домой с 15 000 ₽ и старым седаном. Чтобы запустить пульт, нужно убедить жителей доверить ему первые десять объектов и оформить офис.",
+    full: "Алексей вернулся домой с 15 000 ₽ и без автомобиля. Чтобы запустить пульт, нужно убедить жителей доверить ему первые десять объектов и оформить офис.",
     reward: "5 000 ₽ · +20 репутации · режим пульта",
     target: { x: 92, z: -18, label: "Центральный офис" },
   },
@@ -416,6 +443,7 @@ const QUESTS = [
 ] as const;
 
 const DEFAULT_QUESTS: QuestProgress[] = [
+  { id: "quest_first_car", status: "active", tracked: true, read: false },
   { id: "quest_open_office", status: "active", tracked: true, read: false },
   { id: "quest_false_alarm_wave", status: "active", tracked: false, read: true },
   { id: "quest_daily_sales", status: "active", tracked: false, read: true },
@@ -440,17 +468,25 @@ const localDateKey = (date = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-function createDailyChallenges(previous: DailyChallengeState | undefined, officeAvailable: boolean): DailyChallengeState {
+function createDailyChallenges(previous: DailyChallengeState | undefined, officeAvailable: boolean, hasVehicle: boolean): DailyChallengeState {
   const today = localDateKey();
-  if (previous?.lastUpdateDate === today) return previous;
+  if (previous?.lastUpdateDate === today && (hasVehicle || previous.activeChallenges.every((challenge) => challenge.metric !== "drive_km" && challenge.metric !== "drifts" && challenge.metric !== "upgrades"))) return previous;
   const previousIds = previous?.activeChallenges.map((challenge) => challenge.id) ?? [];
-  const categories = officeAvailable ? ["manager", "console", "driving", "universal"] : ["manager", "manager", "driving", "universal"];
+  const categories = hasVehicle
+    ? officeAvailable
+      ? ["manager", "console", "driving", "universal"]
+      : ["manager", "manager", "driving", "universal"]
+    : officeAvailable
+      ? ["manager", "console", "universal", "manager"]
+      : ["manager", "manager", "universal", "universal"];
   const seed = Number(today.replaceAll("-", ""));
+  const selectedIds: string[] = [];
   const activeChallenges = categories.map((category, index) => {
-    const available = DAILY_CHALLENGES.filter((challenge) => challenge.category === category && !previousIds.includes(challenge.id));
-    const fallback = DAILY_CHALLENGES.filter((challenge) => challenge.category === category);
+    const available = DAILY_CHALLENGES.filter((challenge) => challenge.category === category && !previousIds.includes(challenge.id) && !selectedIds.includes(challenge.id));
+    const fallback = DAILY_CHALLENGES.filter((challenge) => challenge.category === category && !selectedIds.includes(challenge.id));
     const pool = available.length ? available : fallback;
     const selected = pool[(seed + index * 7) % pool.length];
+    selectedIds.push(selected.id);
     return { id: selected.id, metric: selected.metric, progress: 0, claimed: false, tracked: index < 2 };
   });
   const yesterday = new Date();
@@ -616,6 +652,7 @@ const EMPTY_STATS: PlayerStatistics = {
 
 const ACHIEVEMENTS = [
   { id: "first_contract", title: "Первый контракт", description: "Подпишите первого клиента." },
+  { id: "first_wheels", title: "Первые колёса", description: "Купите первый личный автомобиль." },
   { id: "trusted_manager", title: "Заслуженное доверие", description: "Достигните 50 очков репутации." },
   { id: "road_trip", title: "Знаю каждую дорогу", description: "Проедьте 5 километров." },
   { id: "night_owl", title: "Ночной ястреб", description: "Успешно обработайте тревогу." },
@@ -637,7 +674,7 @@ const DEFAULT_SAVE: SaveData = {
   weather: "Ясно",
   playerPos: DEFAULT_PLAYER_POSITION,
   carPos: DEFAULT_CAR_POSITION,
-  carFuel: 20,
+  carFuel: 0,
   carWear: 0,
   statistics: EMPTY_STATS,
   achievements: [],
@@ -645,13 +682,13 @@ const DEFAULT_SAVE: SaveData = {
   extendedContracts: [],
   openedBranches: ["central"],
   staff: EMPTY_STAFF,
-  ownedVehicles: ["old_sedan"],
-  currentVehicle: "old_sedan",
+  ownedVehicles: [],
+  currentVehicle: null,
   loan: null,
   businessMonth: 1,
   officeRented: false,
   quests: DEFAULT_QUESTS,
-  dailyChallenges: createDailyChallenges(undefined, false),
+  dailyChallenges: createDailyChallenges(undefined, false, false),
   vehicleSiren: false,
   carClean: false,
   seasonalTires: false,
@@ -668,6 +705,13 @@ function checksum(data: SaveData) {
 }
 
 function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
+  const ownedVehicles = Array.isArray(value?.ownedVehicles)
+    ? value.ownedVehicles.filter((vehicle): vehicle is VehicleId => Boolean(VEHICLE_BY_ID[vehicle]))
+    : [];
+  const currentVehicle =
+    value?.currentVehicle && VEHICLE_BY_ID[value.currentVehicle] && ownedVehicles.includes(value.currentVehicle)
+      ? value.currentVehicle
+      : ownedVehicles[0] ?? null;
   return {
     ...DEFAULT_SAVE,
     ...value,
@@ -680,17 +724,17 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
     extendedContracts: Array.isArray(value?.extendedContracts) ? value.extendedContracts : [],
     openedBranches: Array.isArray(value?.openedBranches) ? value.openedBranches : ["central"],
     staff: { ...EMPTY_STAFF, ...(value?.staff ?? {}) },
-    ownedVehicles: Array.isArray(value?.ownedVehicles) ? value.ownedVehicles : ["old_sedan"],
-    currentVehicle: value?.currentVehicle && VEHICLE_BY_ID[value.currentVehicle] ? value.currentVehicle : "old_sedan",
+    ownedVehicles,
+    currentVehicle,
     loan: value?.loan ?? null,
     businessMonth: value?.businessMonth ?? 1,
     officeRented: value?.officeRented ?? false,
     quests: Array.isArray(value?.quests) ? value.quests : DEFAULT_QUESTS,
-    dailyChallenges: createDailyChallenges(value?.dailyChallenges, value?.officeRented ?? false),
+    dailyChallenges: createDailyChallenges(value?.dailyChallenges, value?.officeRented ?? false, ownedVehicles.length > 0),
     vehicleSiren: value?.vehicleSiren ?? false,
     carClean: value?.carClean ?? false,
     seasonalTires: value?.seasonalTires ?? false,
-    carFuel: value?.carFuel === undefined ? 20 : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
+    carFuel: value?.carFuel === undefined ? (ownedVehicles.length > 0 ? 20 : 0) : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
 }
 
@@ -1252,20 +1296,21 @@ function makeBusStop(stop: BusStopSpec) {
     new THREE.BoxGeometry(6.8, 3.2, 0.16),
     new THREE.MeshStandardMaterial({ color: 0x9bc9c4, transparent: true, opacity: 0.62, roughness: 0.3 }),
   );
-  back.position.set(0, 1.75, 1.48);
+  back.position.set(0, 1.75, -1.48);
   const bench = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.28, 0.9), mat(0x916b45));
-  bench.position.set(0, 0.9, 0.72);
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 1.25), new THREE.MeshBasicMaterial({ map: makeTextBoard(`АВТОБУС · ${stop.name}`), side: THREE.DoubleSide }));
-  sign.position.set(0, 2.65, 1.37);
-  sign.rotation.y = Math.PI;
+  bench.position.set(0, 0.9, -0.7);
+  const benchBack = new THREE.Mesh(new THREE.BoxGeometry(4.8, 1.0, 0.2), mat(0x7d5a3c));
+  benchBack.position.set(0, 1.35, -1.14);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 1.25), new THREE.MeshBasicMaterial({ map: makeTextBoard(`АВТОБУС · ${stop.name}`), side: THREE.FrontSide }));
+  sign.position.set(0, 2.65, -1.37);
   const routePlate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.14), mat(0xf0b44e));
   routePlate.position.set(2.85, 2.0, -1.55);
   for (const x of [-3.15, 3.15]) {
     const support = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.4, 0.18), mat(0x314842));
-    support.position.set(x, 1.7, 1.35);
+    support.position.set(x, 1.7, -1.35);
     group.add(support);
   }
-  group.add(shelter, back, bench, sign, routePlate);
+  group.add(shelter, back, bench, benchBack, sign, routePlate);
   group.position.set(stop.x, 0, stop.z);
   group.traverse((part) => {
     if (part instanceof THREE.Mesh) {
@@ -1387,6 +1432,7 @@ export default function SecurityConsoleGame() {
     colliders: WorldCollider[];
     walkers: Walker[];
     traffic: TrafficVehicle[];
+    busPassengers: BusPassenger[];
     remoteMeshes: Map<string, THREE.Group>;
     nearest: Resident | null;
     time: number;
@@ -1400,7 +1446,7 @@ export default function SecurityConsoleGame() {
     carSpeed: 0,
     carSteer: 0,
     carSlip: 0,
-    fuel: 20,
+    fuel: 0,
     odometer: 0,
     wear: 0,
     surface: "Асфальт",
@@ -1410,6 +1456,7 @@ export default function SecurityConsoleGame() {
     colliders: [],
     walkers: [],
     traffic: [],
+    busPassengers: [],
     remoteMeshes: new Map(),
     nearest: null,
     time: 8.25,
@@ -1459,7 +1506,7 @@ export default function SecurityConsoleGame() {
   const weatherRef = useRef<WeatherKind>(initialSave.weather ?? "Ясно");
   const [movementState, setMovementState] = useState<MovementState>("Покой");
   const [playerSpeedKmh, setPlayerSpeedKmh] = useState(0);
-  const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: initialSave.carFuel ?? 20, surface: "Асфальт" as SurfaceKind, wear: initialSave.carWear ?? 0 });
+  const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: initialSave.carFuel ?? 0, surface: "Асфальт" as SurfaceKind, wear: initialSave.carWear ?? 0 });
   const [outfitId, setOutfitId] = useState<OutfitId>(initialOutfit);
   const outfitRef = useRef<OutfitId>(initialOutfit);
   const [ownedOutfits, setOwnedOutfits] = useState<OutfitId[]>(initialOwned);
@@ -1497,10 +1544,11 @@ export default function SecurityConsoleGame() {
   const openedBranchesRef = useRef(openedBranches);
   const [staff, setStaff] = useState<StaffState>(initialSave.staff ?? EMPTY_STAFF);
   const staffRef = useRef(staff);
-  const [ownedVehicles, setOwnedVehicles] = useState<VehicleId[]>(initialSave.ownedVehicles ?? ["old_sedan"]);
+  const [ownedVehicles, setOwnedVehicles] = useState<VehicleId[]>(initialSave.ownedVehicles ?? []);
   const ownedVehiclesRef = useRef(ownedVehicles);
-  const [currentVehicle, setCurrentVehicle] = useState<VehicleId>(initialSave.currentVehicle ?? "old_sedan");
+  const [currentVehicle, setCurrentVehicle] = useState<VehicleId | null>(initialSave.currentVehicle ?? null);
   const currentVehicleRef = useRef(currentVehicle);
+  const [rentalActive, setRentalActive] = useState(false);
   const [loan, setLoan] = useState<LoanState>(initialSave.loan ?? null);
   const loanRef = useRef(loan);
   const [businessMonth, setBusinessMonth] = useState(initialSave.businessMonth ?? 1);
@@ -1511,9 +1559,9 @@ export default function SecurityConsoleGame() {
   const questsRef = useRef(quests);
   const questStatusesRef = useRef<Record<string, QuestStatus>>(Object.fromEntries(quests.map((quest) => [quest.id, quest.status])));
   const [questFilter, setQuestFilter] = useState<"all" | QuestCategory | "completed">("all");
-  const [selectedQuestId, setSelectedQuestId] = useState("quest_open_office");
+  const [selectedQuestId, setSelectedQuestId] = useState("quest_first_car");
   const [questView, setQuestView] = useState<"journal" | "daily">("journal");
-  const [dailyChallenges, setDailyChallenges] = useState<DailyChallengeState>(() => createDailyChallenges(initialSave.dailyChallenges, initialSave.officeRented ?? false));
+  const [dailyChallenges, setDailyChallenges] = useState<DailyChallengeState>(() => createDailyChallenges(initialSave.dailyChallenges, initialSave.officeRented ?? false, (initialSave.ownedVehicles?.length ?? 0) > 0));
   const dailyChallengesRef = useRef(dailyChallenges);
   const dailyDistanceRef = useRef(initialSave.statistics?.kmDriven ?? 0);
   const [dailyResetLabel, setDailyResetLabel] = useState("");
@@ -1528,6 +1576,8 @@ export default function SecurityConsoleGame() {
   const networkChannelRef = useRef<BroadcastChannel | null>(null);
   const isResettingRef = useRef(false);
   const [networkChat, setNetworkChat] = useState<NetworkChatMessage[]>([]);
+  const [trafficIncident, setTrafficIncident] = useState<TrafficIncident | null>(null);
+  const firstCarReminderRef = useRef(false);
   const [networkChatInput, setNetworkChatInput] = useState("");
   const [saveSlots, setSaveSlots] = useState<Record<SaveSlotId, SaveEnvelope | null>>(() => ({
     auto: readEnvelope("auto"),
@@ -1913,13 +1963,22 @@ export default function SecurityConsoleGame() {
   useEffect(() => {
     setQuests((current) => current.map((quest) => {
       const completed =
+        (quest.id === "quest_first_car" && ownedVehicles.length > 0) ||
         (quest.id === "quest_open_office" && signedCount >= 10 && officeRented) ||
         (quest.id === "quest_garage_secrets" && residents[0]?.signed) ||
         (quest.id === "quest_false_alarm_wave" && statistics.alarmsResponded >= 3) ||
         (quest.id === "quest_daily_sales" && totalContracts >= 2);
       return completed && quest.status !== "completed" ? { ...quest, status: "completed" } : quest;
     }));
-  }, [officeRented, residents, signedCount, statistics.alarmsResponded, totalContracts]);
+  }, [officeRented, ownedVehicles.length, residents, signedCount, statistics.alarmsResponded, totalContracts]);
+
+  useEffect(() => {
+    if (ownedVehicles.length === 0 && money >= 20000 && !firstCarReminderRef.current) {
+      firstCarReminderRef.current = true;
+      window.setTimeout(() => flash("Вы почти можете позволить себе Оку! Автосалон отмечен на карте."), 0);
+    }
+    if (ownedVehicles.length > 0) firstCarReminderRef.current = false;
+  }, [flash, money, ownedVehicles.length]);
 
   useEffect(() => {
     quests.forEach((progress) => {
@@ -2067,6 +2126,7 @@ export default function SecurityConsoleGame() {
     engine.colliders = [];
     engine.walkers = [];
     engine.traffic = [];
+    engine.busPassengers = [];
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 420), mat(0x78ad5d));
     ground.rotation.x = -Math.PI / 2;
@@ -2349,10 +2409,11 @@ export default function SecurityConsoleGame() {
     const car = makeCar();
     car.position.set(initialCarPosition.x, 0, initialCarPosition.z);
     car.rotation.y = Math.PI / 2;
+    car.visible = currentVehicleRef.current !== null;
     scene.add(car);
     engine.car = car;
     engine.time = initialSave.gameTime ?? 8.25;
-    engine.fuel = initialSave.carFuel ?? 20;
+    engine.fuel = initialSave.carFuel ?? 0;
     engine.wear = initialSave.carWear ?? 0;
 
     residentsRef.current.forEach((resident) => {
@@ -2425,6 +2486,31 @@ export default function SecurityConsoleGame() {
     let busCurrentStop = 0;
     let busNextStop = 1;
     let busDwellSeconds = 10;
+    let busServiceKey = "";
+
+    const passengerColors = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
+    BUS_STOPS.forEach((stop, stopIndex) => {
+      const directions: (1 | -1)[] = stopIndex === 0 ? [1, 1, 1, 1] : stopIndex === BUS_STOPS.length - 1 ? [-1, -1, -1, -1] : [1, 1, -1, -1];
+      directions.forEach((direction, passengerIndex) => {
+        const passenger = makePerson(passengerColors[(stopIndex * 4 + passengerIndex) % passengerColors.length]);
+        passenger.scale.setScalar(0.54);
+        const waitingZ = direction > 0 ? -15.4 : 15.4;
+        passenger.position.set(stop.x - 2.1 + passengerIndex * 1.35, 0, waitingZ);
+        passenger.rotation.y = direction > 0 ? 0 : Math.PI;
+        passenger.name = `busPassenger-${stop.id}-${passengerIndex}`;
+        scene.add(passenger);
+        engine.busPassengers.push({
+          mesh: passenger,
+          stopIndex,
+          direction,
+          targetStop: stopIndex,
+          state: "waiting",
+          progress: 0,
+          start: passenger.position.clone(),
+          end: passenger.position.clone(),
+        });
+      });
+    });
 
     let last = performance.now();
     let uiTick = 0;
@@ -2434,6 +2520,9 @@ export default function SecurityConsoleGame() {
     let mouseDown = false;
     let lastMouseX = 0;
     let lastMouseY = 0;
+    let lastCollisionAt = 0;
+    let nextViolationCheck = 0;
+    let wrongLaneSeconds = 0;
 
     const onKeyDown = (e: KeyboardEvent) => {
       const editingText = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
@@ -2517,13 +2606,13 @@ export default function SecurityConsoleGame() {
           setMode("transit");
           return;
         }
-        if (!engine.driving && engine.car && focus.position.distanceTo(engine.car.position) < 5.2) {
+        if (!engine.driving && currentVehicleRef.current && engine.car?.visible && focus.position.distanceTo(engine.car.position) < 5.2) {
           engine.driving = true;
           engine.yaw = car.rotation.y + Math.PI;
           engine.cameraInputAt = performance.now();
           player.visible = false;
           setDriving(true);
-          flash("Вы сели в старый седан");
+          flash(`Вы сели в ${VEHICLE_BY_ID[currentVehicleRef.current].name.toLowerCase()}`);
           return;
         }
         if (engine.driving && Math.abs(engine.carSpeed) < 1.2) {
@@ -2610,6 +2699,27 @@ export default function SecurityConsoleGame() {
     renderer.domElement.addEventListener("wheel", onWheel, { passive: true });
     renderer.domElement.addEventListener("contextmenu", onContextMenu);
 
+    const applyTrafficPenalty = (title: string, detail: string, fine: number, reputationLoss: number) => {
+      if (fine > 0) {
+        const nextMoney = moneyRef.current - fine;
+        moneyRef.current = nextMoney;
+        setMoney(nextMoney);
+      }
+      if (reputationLoss > 0) setReputation((value) => Math.max(0, value - reputationLoss));
+      setTrafficIncident({ title, detail, fine });
+      window.setTimeout(() => setTrafficIncident(null), 5200);
+      flash(fine > 0 ? `${title} · штраф ${fine.toLocaleString("ru-RU")} ₽` : title);
+    };
+
+    const collisionKindAt = (x: number, z: number, radius: number) => {
+      if (engine.residents.some((resident) => resident.mesh && Math.hypot(x - resident.mesh.position.x, z - resident.mesh.position.z) < radius + 0.78)) return "pedestrian";
+      if (engine.walkers.some((walker) => Math.hypot(x - walker.mesh.position.x, z - walker.mesh.position.z) < radius + 0.72)) return "pedestrian";
+      if (engine.busPassengers.some((passenger) => passenger.mesh.visible && passenger.state !== "riding" && Math.hypot(x - passenger.mesh.position.x, z - passenger.mesh.position.z) < radius + 0.72)) return "pedestrian";
+      if (engine.traffic.some((vehicle) => Math.hypot(x - vehicle.mesh.position.x, z - vehicle.mesh.position.z) < radius + 2.2)) return "vehicle";
+      if (bus.visible && Math.hypot(x - bus.position.x, z - bus.position.z) < radius + 4.2) return "bus";
+      return "object";
+    };
+
     const isBlocked = (x: number, z: number, radius: number, includeCar: boolean) => {
       if (engine.colliders.some((collider) => touchesBox(x, z, radius, collider))) return true;
       for (const resident of engine.residents) {
@@ -2622,13 +2732,18 @@ export default function SecurityConsoleGame() {
           return true;
         }
       }
+      for (const passenger of engine.busPassengers) {
+        if (passenger.mesh.visible && passenger.state !== "riding" && Math.hypot(x - passenger.mesh.position.x, z - passenger.mesh.position.z) < radius + 0.72) {
+          return true;
+        }
+      }
       for (const trafficVehicle of engine.traffic) {
         if (Math.hypot(x - trafficVehicle.mesh.position.x, z - trafficVehicle.mesh.position.z) < radius + 2.2) {
           return true;
         }
       }
       if (bus.visible && Math.hypot(x - bus.position.x, z - bus.position.z) < radius + 4.2) return true;
-      if (includeCar && Math.hypot(x - car.position.x, z - car.position.z) < radius + 2.25) return true;
+      if (includeCar && car.visible && Math.hypot(x - car.position.x, z - car.position.z) < radius + 2.25) return true;
       return false;
     };
 
@@ -2643,6 +2758,7 @@ export default function SecurityConsoleGame() {
       let currentWalkSpeedKmh = 0;
 
       if (canMove && engine.driving) {
+        const activeVehicle = currentVehicleRef.current ? VEHICLE_BY_ID[currentVehicleRef.current] : VEHICLE_BY_ID.oka;
         const throttle = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
         const steerInput = (engine.keys.has("left") ? 1 : 0) - (engine.keys.has("right") ? 1 : 0);
         const handbrake = engine.keys.has("brake");
@@ -2651,7 +2767,8 @@ export default function SecurityConsoleGame() {
         const gripBase = surface === "Асфальт" ? 1 : surface === "Грунт" ? 0.64 : 0.4;
         const wetGrip = weatherRef.current === "Дождь" || weatherRef.current === "Гроза" ? 0.78 : 1;
         const grip = gripBase * wetGrip * (handbrake ? 0.24 : 1);
-        const maxSpeed = (VEHICLE_BY_ID[currentVehicleRef.current].maxSpeed / 3.6) * (1 + carUpgradeRef.current * 0.15);
+        const damageSpeedFactor = engine.wear >= 70 ? 0.72 : engine.wear >= 35 ? 0.88 : 1;
+        const maxSpeed = (activeVehicle.maxSpeed / 3.6) * (1 + carUpgradeRef.current * 0.15) * damageSpeedFactor;
         const acceleration = 6.2 * (1 + carUpgradeRef.current * 0.12) * (surface === "Трава" ? 0.72 : 1);
         if (throttle !== 0 && engine.fuel > 0) {
           const directionPenalty = Math.sign(throttle) !== Math.sign(engine.carSpeed) && Math.abs(engine.carSpeed) > 1 ? 1.65 : 1;
@@ -2696,13 +2813,48 @@ export default function SecurityConsoleGame() {
           statisticsRef.current.kmDriven += travelled / 1000;
           engine.fuel = Math.max(
             0,
-            engine.fuel - (travelled / 100_000) * VEHICLE_BY_ID[currentVehicleRef.current].fuelUse * (1 + Math.abs(throttle) * 0.18),
+            engine.fuel - (travelled / 100_000) * activeVehicle.fuelUse * (1 + Math.abs(throttle) * 0.18) * (engine.wear >= 60 ? 1.25 : 1),
           );
+          const speedKmh = Math.abs(engine.carSpeed) * 3.6;
+          const residential = car.position.x < 450 || car.position.x > 3550;
+          const speedLimit = residential ? 60 : 90;
+          if (now >= nextViolationCheck && speedKmh > speedLimit + 4) {
+            nextViolationCheck = now + 9000;
+            const cameraChance = residential ? 0.3 : 0.1;
+            if (Math.random() < cameraChance) applyTrafficPenalty("Камера зафиксировала превышение", `Разрешено ${speedLimit} км/ч · ваша скорость ${Math.round(speedKmh)} км/ч`, 500, 0);
+          }
+          const travelDirectionX = carDirection.x * Math.sign(engine.carSpeed || 1);
+          const onMainRoad = Math.abs(car.position.z) < 8;
+          const wrongRightHandLane = onMainRoad && ((travelDirectionX > 0.25 && car.position.z > 0.7) || (travelDirectionX < -0.25 && car.position.z < -0.7));
+          wrongLaneSeconds = wrongRightHandLane && speedKmh > 8 ? wrongLaneSeconds + dt : Math.max(0, wrongLaneSeconds - dt * 2);
+          if (wrongLaneSeconds >= 4 && now >= nextViolationCheck) {
+            wrongLaneSeconds = 0;
+            nextViolationCheck = now + 12000;
+            applyTrafficPenalty("Выезд на встречную полосу", "В игре действует правостороннее движение", 1500, 3);
+          }
         } else {
           const impact = Math.abs(engine.carSpeed);
+          const impactKmh = impact * 3.6;
+          const collisionKind = collisionKindAt(candidateX, candidateZ, 2.25);
           engine.carSpeed *= -0.12;
           engine.carSlip *= -0.2;
-          engine.wear = clamp(engine.wear + impact * 0.025, 0, 100);
+          if (now - lastCollisionAt > 1600) {
+            lastCollisionAt = now;
+            if (collisionKind === "pedestrian") {
+              engine.wear = clamp(engine.wear + 35, 0, 100);
+              applyTrafficPenalty("Опасное ДТП с пешеходом", "Движение остановлено. Вызваны полиция и скорая помощь.", 10000, 50);
+            } else if (impactKmh < 15) {
+              engine.wear = clamp(engine.wear + 1, 0, 100);
+              applyTrafficPenalty("Лёгкое столкновение", "На кузове появились царапины · износ +1%", 0, 0);
+            } else if (impactKmh <= 40) {
+              engine.wear = clamp(engine.wear + 10, 0, 100);
+              applyTrafficPenalty("Среднее ДТП", `${collisionKind === "vehicle" || collisionKind === "bus" ? "Столкновение с транспортом" : "Удар о препятствие"} · износ +10%`, 1000, 5);
+            } else {
+              engine.wear = clamp(engine.wear + 30, 0, 100);
+              engine.fuel = Math.max(0, engine.fuel - 3);
+              applyTrafficPenalty("Серьёзное ДТП", "Сильное повреждение · износ +30% · утечка 3 л топлива", 3000, 15);
+            }
+          }
         }
         const carVisual = car.getObjectByName("carVisual");
         if (carVisual) {
@@ -2872,6 +3024,28 @@ export default function SecurityConsoleGame() {
       if (busOperating) {
         if (busDwellSeconds > 0) {
           busDwellSeconds = Math.max(0, busDwellSeconds - dt);
+          const serviceKey = `${busCurrentStop}:${busDirection}`;
+          if (serviceKey !== busServiceKey) {
+            busServiceKey = serviceKey;
+            engine.busPassengers.forEach((passenger, passengerIndex) => {
+              if (passenger.state === "riding" && passenger.targetStop === busCurrentStop) {
+                passenger.state = "exiting";
+                passenger.progress = 0;
+                passenger.mesh.visible = true;
+                passenger.start.set(bus.position.x + (busDirection > 0 ? 2.5 : -2.5), 0, bus.position.z + (busDirection > 0 ? -1.6 : 1.6));
+                passenger.end.set(BUS_STOPS[busCurrentStop].x - 2 + (passengerIndex % 4) * 1.25, 0, busDirection > 0 ? -15.4 : 15.4);
+                passenger.mesh.position.copy(passenger.start);
+              } else if (passenger.state === "waiting" && passenger.stopIndex === busCurrentStop && passenger.direction === busDirection) {
+                passenger.state = "boarding";
+                passenger.progress = 0;
+                passenger.start.copy(passenger.mesh.position);
+                passenger.end.set(bus.position.x + (busDirection > 0 ? 2.5 : -2.5), 0, bus.position.z + (busDirection > 0 ? -1.6 : 1.6));
+                const remainingStops = busDirection > 0 ? BUS_STOPS.length - 1 - busCurrentStop : busCurrentStop;
+                const rideCount = Math.max(1, Math.min(remainingStops, 1 + (passengerIndex % 2)));
+                passenger.targetStop = busCurrentStop + busDirection * rideCount;
+              }
+            });
+          }
         } else {
           const targetX = BUS_STOPS[busNextStop].x;
           const remaining = targetX - bus.position.x;
@@ -2885,6 +3059,7 @@ export default function SecurityConsoleGame() {
             busNextStop = busCurrentStop + busDirection;
           } else {
             bus.position.x += Math.sign(remaining) * busSpeed * dt;
+            busServiceKey = "";
           }
         }
         bus.position.z = busDirection > 0 ? -3.8 : 3.8;
@@ -2897,6 +3072,25 @@ export default function SecurityConsoleGame() {
           }
         });
       }
+      engine.busPassengers.forEach((passenger, passengerIndex) => {
+        if (passenger.state !== "boarding" && passenger.state !== "exiting") return;
+        passenger.progress = Math.min(1, passenger.progress + dt / 2.4);
+        passenger.mesh.position.lerpVectors(passenger.start, passenger.end, passenger.progress);
+        passenger.mesh.rotation.y = Math.atan2(passenger.end.x - passenger.start.x, passenger.end.z - passenger.start.z);
+        personWalkCycle(passenger.mesh, true, now, passengerIndex * 0.55);
+        if (passenger.progress >= 1) {
+          if (passenger.state === "boarding") {
+            passenger.state = "riding";
+            passenger.mesh.visible = false;
+          } else {
+            passenger.state = "waiting";
+            passenger.stopIndex = passenger.targetStop;
+            passenger.direction = passenger.stopIndex === 0 ? 1 : passenger.stopIndex === BUS_STOPS.length - 1 ? -1 : (busDirection === 1 ? -1 : 1);
+            passenger.mesh.position.z = passenger.direction > 0 ? -15.4 : 15.4;
+            passenger.mesh.visible = true;
+          }
+        }
+      });
 
       if (canMove && !engine.driving) {
         let closest: Resident | null = null;
@@ -2932,7 +3126,7 @@ export default function SecurityConsoleGame() {
         setEnergy(Math.round(energyRef.current));
         setGameTime(engine.time);
         setNearest(engine.nearest);
-        setNearCar(!engine.driving && player.position.distanceTo(car.position) < 5.2);
+        setNearCar(Boolean(currentVehicleRef.current) && car.visible && !engine.driving && player.position.distanceTo(car.position) < 5.2);
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
         setCarPos({ x: car.position.x, z: car.position.z });
         setMovementState(currentMovement);
@@ -3389,10 +3583,35 @@ export default function SecurityConsoleGame() {
     flash(`${role.name} принят в штат · ${role.salary.toLocaleString("ru-RU")} ₽/мес.`);
   };
 
+  const rentOkaForDay = () => {
+    if (ownedVehiclesRef.current.length > 0 || rentalActive) {
+      flash("Аренда доступна, когда нет личного автомобиля");
+      return;
+    }
+    if (moneyRef.current < 500) {
+      flash("Для аренды нужно 500 ₽");
+      return;
+    }
+    const nextMoney = moneyRef.current - 500;
+    moneyRef.current = nextMoney;
+    currentVehicleRef.current = "oka";
+    setMoney(nextMoney);
+    setCurrentVehicle("oka");
+    setRentalActive(true);
+    engineRef.current.fuel = 20;
+    if (engineRef.current.car) {
+      engineRef.current.car.visible = true;
+      if (engineRef.current.player) engineRef.current.car.position.set(engineRef.current.player.position.x + 6, 0, engineRef.current.player.position.z);
+    }
+    setCarTelemetry((value) => ({ ...value, fuel: 20, wear: 15 }));
+    flash("Ока арендована до конца игрового дня · 500 ₽");
+  };
+
   const buyVehicle = (vehicle: VehicleSpec, used = false) => {
     if (ownedVehiclesRef.current.includes(vehicle.id)) {
       currentVehicleRef.current = vehicle.id;
       setCurrentVehicle(vehicle.id);
+      if (engineRef.current.car) engineRef.current.car.visible = true;
       flash(`${vehicle.name} выбран`);
       return;
     }
@@ -3401,13 +3620,27 @@ export default function SecurityConsoleGame() {
       flash(`Не хватает ${(price - money).toLocaleString("ru-RU")} ₽`);
       return;
     }
+    const firstVehicle = ownedVehiclesRef.current.length === 0;
     const nextOwned = [...ownedVehiclesRef.current, vehicle.id];
     const nextMoney = money - price;
     ownedVehiclesRef.current = nextOwned;
     currentVehicleRef.current = vehicle.id;
     setOwnedVehicles(nextOwned);
     setCurrentVehicle(vehicle.id);
+    setRentalActive(false);
     setMoney(nextMoney);
+    if (engineRef.current.car) {
+      engineRef.current.car.visible = true;
+      if (firstVehicle && engineRef.current.player) {
+        engineRef.current.car.position.set(engineRef.current.player.position.x + 6, 0, engineRef.current.player.position.z);
+        engineRef.current.car.rotation.y = Math.PI / 2;
+      }
+    }
+    if (firstVehicle) {
+      engineRef.current.fuel = 20;
+      setCarTelemetry((value) => ({ ...value, fuel: 20 }));
+      unlockAchievement("first_wheels");
+    }
     if (used) engineRef.current.wear = 30 + ((vehicle.price / 1000) % 21);
     persist(residentsRef.current, nextMoney, reputation);
     updateDailyChallenge("upgrades");
@@ -3415,6 +3648,10 @@ export default function SecurityConsoleGame() {
   };
 
   const tradeInCurrentVehicle = () => {
+    if (!currentVehicleRef.current) {
+      flash("Сначала купите автомобиль");
+      return;
+    }
     if (ownedVehiclesRef.current.length <= 1) {
       flash("Нельзя продать единственный автомобиль");
       return;
@@ -3437,6 +3674,10 @@ export default function SecurityConsoleGame() {
   };
 
   const serviceVehicle = (action: "fuel" | "wash" | "repair" | "tires" | "siren") => {
+    if (!currentVehicleRef.current) {
+      flash("В гараже пока нет автомобиля");
+      return;
+    }
     const prices = {
       fuel: Math.max(0, Math.round((FUEL_TANK_LITERS - engineRef.current.fuel) * 50)),
       wash: 200,
@@ -3478,6 +3719,10 @@ export default function SecurityConsoleGame() {
 
   const buyStationService = (service: StationService) => {
     if (serviceBusy) return;
+    if ((service.startsWith("fuel") || service === "wash" || service === "oil" || service === "tires") && !currentVehicleRef.current) {
+      flash("Сначала нужен автомобиль");
+      return;
+    }
     const currentFuel = engineRef.current.fuel;
     const fuelLiters =
       service === "fuel10"
@@ -3717,14 +3962,14 @@ export default function SecurityConsoleGame() {
       extendedContracts: [],
       openedBranches: ["central"],
       staff: { ...EMPTY_STAFF },
-      ownedVehicles: ["old_sedan"],
-      currentVehicle: "old_sedan",
+      ownedVehicles: [],
+      currentVehicle: null,
       loan: null,
       businessMonth: 1,
       officeRented: false,
       quests: DEFAULT_QUESTS.map((quest) => ({ ...quest })),
-      dailyChallenges: createDailyChallenges(undefined, false),
-      carFuel: 20,
+      dailyChallenges: createDailyChallenges(undefined, false, false),
+      carFuel: 0,
       carWear: 0,
     });
     try {
@@ -3835,11 +4080,12 @@ export default function SecurityConsoleGame() {
             {quests.filter((quest) => quest.tracked && quest.status === "active").slice(0, 3).map((progress) => {
               const definition = QUESTS.find((quest) => quest.id === progress.id);
               if (!definition) return null;
-              const value = progress.id === "quest_open_office" ? signedCount : progress.id === "quest_daily_sales" ? Math.min(totalContracts, 2) : progress.id === "quest_false_alarm_wave" ? Math.min(statistics.alarmsResponded, 3) : residents[0]?.signed ? 1 : 0;
-              const target = progress.id === "quest_open_office" ? 10 : progress.id === "quest_daily_sales" ? 2 : progress.id === "quest_false_alarm_wave" ? 3 : 1;
+              const value = progress.id === "quest_first_car" ? Math.min(money, 20000) : progress.id === "quest_open_office" ? signedCount : progress.id === "quest_daily_sales" ? Math.min(totalContracts, 2) : progress.id === "quest_false_alarm_wave" ? Math.min(statistics.alarmsResponded, 3) : residents[0]?.signed ? 1 : 0;
+              const target = progress.id === "quest_first_car" ? 20000 : progress.id === "quest_open_office" ? 10 : progress.id === "quest_daily_sales" ? 2 : progress.id === "quest_false_alarm_wave" ? 3 : 1;
               return <div key={progress.id}><b>📋 {definition.title}</b><span>• {definition.short} · {value}/{target}</span></div>;
             })}
           </div>
+          {trafficIncident && <div className="traffic-incident"><b>{trafficIncident.title}</b><span>{trafficIncident.detail}</span><strong>{trafficIncident.fine > 0 ? `−${trafficIncident.fine.toLocaleString("ru-RU")} ₽` : "Без штрафа"}</strong></div>}
           <div className="daily-hud">
             {dailyChallenges.activeChallenges.filter((challenge) => challenge.tracked && !challenge.claimed).slice(0, 2).map((challenge) => {
               const definition = DAILY_CHALLENGES.find((item) => item.id === challenge.id);
@@ -3908,7 +4154,7 @@ export default function SecurityConsoleGame() {
               <span>{driving ? "Выйти из машины" : `Поговорить · ${nearest?.name}`}</span>
             </div>
           )}
-          {mode === "world" && !driving && nearCar && !nearest && !nearStationId && !nearBusStopId && (
+          {mode === "world" && !driving && currentVehicle && nearCar && !nearest && !nearStationId && !nearBusStopId && (
             <div className="interaction-prompt"><span className="key">E</span><span>Сесть в {VEHICLE_BY_ID[currentVehicle].name.toLowerCase()}</span></div>
           )}
         </div>
@@ -3983,7 +4229,7 @@ export default function SecurityConsoleGame() {
           <div className="intro-copy">
             <div className="eyebrow">● Играбельный low-poly прототип</div>
             <h1>Пульт <em>охраны</em></h1>
-            <p>Алексей вернулся в Первореченское. Впереди два посёлка, сто домов, четыре километра дороги и одна цель: заслужить доверие жителей и открыть собственный пульт наблюдения.</p>
+            <p>Алексей приехал в Первореченское рейсовым автобусом — без личной машины, но с 15 000 ₽ и планом открыть охранное предприятие. Первые маршруты предстоит пройти пешком или проехать на автобусе №21.</p>
             <div className="intro-actions">
               <button className="primary-btn" onClick={() => setMode("world")}>Выйти в посёлок →</button>
               <button className="soft-btn" onClick={() => startOffice(true)}>Демо пульта</button>
@@ -3993,10 +4239,10 @@ export default function SecurityConsoleGame() {
           <aside className="intro-card">
             <div className="mission-ticket">
               <small>Задача на сегодня · 08:15</small>
-              <h3>Первые договоры</h3>
-              <div className="mission-step"><i>1</i><span>Найдите жителей по оранжевым маркерам</span></div>
-              <div className="mission-step"><i>2</i><span>Подберите реплику под характер клиента</span></div>
-              <div className="mission-step"><i>3</i><span>Подключите 10 объектов и откройте пульт</span></div>
+              <h3>Старт без автомобиля</h3>
+              <div className="mission-step"><i>1</i><span>Осмотритесь и найдите ближайшую остановку</span></div>
+              <div className="mission-step"><i>2</i><span>Заключайте договоры пешком или ездите автобусом</span></div>
+              <div className="mission-step"><i>3</i><span>Накопите 20 000 ₽ и купите первые колёса</span></div>
             </div>
           </aside>
         </section>
@@ -4176,6 +4422,11 @@ export default function SecurityConsoleGame() {
                   <p>{selectedQuest.full}</p>
                   <h3>Цели</h3>
                   <div className="quest-objectives">
+                    {selectedQuest.id === "quest_first_car" && <>
+                      <div className={money >= 20000 ? "done" : ""}><i>{money >= 20000 ? "✓" : ""}</i><span>Накопить 20 000 ₽</span><b>{Math.min(money, 20000).toLocaleString("ru-RU")} / 20 000 ₽</b></div>
+                      <div className={ownedVehicles.length > 0 ? "done" : ""}><i>{ownedVehicles.length > 0 ? "✓" : ""}</i><span>Купить первый автомобиль</span><b>{ownedVehicles.length > 0 ? "1/1" : "0/1"}</b></div>
+                      <div className="quest-bus-hint"><i>А</i><span>До автосалона можно доехать автобусом №21. Остановки отмечены на карте.</span><b>06:00–23:00</b></div>
+                    </>}
                     {selectedQuest.id === "quest_open_office" && <>
                       <div className={signedCount >= 10 ? "done" : ""}><i>{signedCount >= 10 ? "✓" : ""}</i><span>Заключить 10 договоров</span><b>{signedCount}/10</b></div>
                       <div className={officeRented ? "done" : ""}><i>{officeRented ? "✓" : ""}</i><span>Арендовать центральный офис</span><b>{officeRented ? "1/1" : "0/1"}</b></div>
@@ -4313,7 +4564,11 @@ export default function SecurityConsoleGame() {
                 <div className="shift-schedule"><div><small>Расписание дежурств</small><h3>Ближайшая смена · 20:00–08:00</h3><p>{officeRented ? `${totalContracts} объектов на связи. Можно автоматически прибыть в офис.` : "Сначала арендуйте центральный офис."}</p></div><button className="primary-btn" disabled={!officeRented || totalContracts < 1} onClick={() => startOffice()}>Начать смену</button></div>
               </>}
               {tabletTab === "fleet" && <>
-                <div className="section-heading"><div><small>Автосалон и служебный гараж</small><h1>Автопарк</h1></div><b>{VEHICLE_BY_ID[currentVehicle].name}</b></div>
+                <div className="section-heading"><div><small>Автосалон и служебный гараж</small><h1>Автопарк</h1></div><b>{currentVehicle ? `${VEHICLE_BY_ID[currentVehicle].name}${rentalActive ? " · аренда" : ""}` : "Нет автомобиля"}</b></div>
+                {ownedVehicles.length === 0 && !rentalActive && <div className="empty-garage-panel">
+                  <div><small>Парковочное место свободно</small><h2>У вас нет автомобиля</h2><p>Купите машину в автосалоне или пользуйтесь автобусом №21. До первой покупки задания по вождению не появляются.</p></div>
+                  <div><button className="primary-btn" onClick={rentOkaForDay}>Арендовать Оку на день · 500 ₽</button>{!loan && <button className="soft-btn" onClick={() => takeLoan(10000)}>Кредит 10 000 ₽ · 10%/мес.</button>}</div>
+                </div>}
                 <div className="vehicle-shop-grid">
                   {VEHICLES.map((vehicle) => {
                     const owned = ownedVehicles.includes(vehicle.id);
@@ -4326,14 +4581,14 @@ export default function SecurityConsoleGame() {
                     </article>;
                   })}
                 </div>
-                <div className="vehicle-service-panel">
-                  <div><small>Активная машина</small><h2>{VEHICLE_BY_ID[currentVehicle].name}</h2><p>Топливо {carTelemetry.fuel.toFixed(2)} л / {FUEL_TANK_LITERS} л · износ {Math.round(carTelemetry.wear)}% · {carClean ? "чистая" : "нужна мойка"} · {seasonalTires ? "сезонные шины" : "обычные шины"} · {vehicleSiren ? "мигалка установлена" : "без мигалки"}</p></div>
+                <div className={`vehicle-service-panel ${currentVehicle ? "" : "empty"}`}>
+                  <div><small>Активная машина</small><h2>{currentVehicle ? VEHICLE_BY_ID[currentVehicle].name : "Гараж пуст"}</h2><p>{currentVehicle ? `Топливо ${carTelemetry.fuel.toFixed(2)} л / ${FUEL_TANK_LITERS} л · износ ${Math.round(carTelemetry.wear)}% · ${carClean ? "чистая" : "нужна мойка"} · ${seasonalTires ? "сезонные шины" : "обычные шины"} · ${vehicleSiren ? "мигалка установлена" : "без мигалки"}` : "Сервис станет доступен после покупки или аренды автомобиля."}</p></div>
                   <div className="service-actions">
-                    <button onClick={() => serviceVehicle("fuel")}>Заправить · 50 ₽/л</button>
-                    <button onClick={() => serviceVehicle("wash")}>Мойка · 200 ₽</button>
-                    <button onClick={() => serviceVehicle("repair")}>Ремонт · до 15 000 ₽</button>
-                    <button onClick={() => serviceVehicle("tires")}>Шины · 2 000 ₽</button>
-                    <button onClick={() => serviceVehicle("siren")}>Мигалка · 8 000 ₽</button>
+                    <button disabled={!currentVehicle} onClick={() => serviceVehicle("fuel")}>Заправить · 50 ₽/л</button>
+                    <button disabled={!currentVehicle} onClick={() => serviceVehicle("wash")}>Мойка · 200 ₽</button>
+                    <button disabled={!currentVehicle} onClick={() => serviceVehicle("repair")}>Ремонт · до 15 000 ₽</button>
+                    <button disabled={!currentVehicle} onClick={() => serviceVehicle("tires")}>Шины · 2 000 ₽</button>
+                    <button disabled={!currentVehicle} onClick={() => serviceVehicle("siren")}>Мигалка · 8 000 ₽</button>
                     <button className="danger" disabled={ownedVehicles.length <= 1} onClick={tradeInCurrentVehicle}>Trade‑in текущей</button>
                   </div>
                 </div>
@@ -4483,7 +4738,7 @@ export default function SecurityConsoleGame() {
               {mapLayers.notes && mapNotes.map((note) => <button key={note.id} className="world-note" title={note.text} onClick={() => setSelectedMapObject(note.text)} style={{ left: worldMapX(note.x), top: worldMapZ(note.z) }}>⚑</button>)}
               {mapWaypoint && <span className="world-waypoint" title={mapWaypoint.label} style={{ left: worldMapX(mapWaypoint.x), top: worldMapZ(mapWaypoint.z) }}>◎</span>}
               {mapWaypoint && mapRouteStyle && <div className="world-route active" style={mapRouteStyle} />}
-              {mapLayers.vehicles && <span className="world-car" title={VEHICLE_BY_ID[currentVehicle].name} style={{ left: worldMapX(carPos.x), top: worldMapZ(carPos.z) }}>◆</span>}
+              {mapLayers.vehicles && currentVehicle && <span className="world-car" title={VEHICLE_BY_ID[currentVehicle].name} style={{ left: worldMapX(carPos.x), top: worldMapZ(carPos.z) }}>◆</span>}
               {mapLayers.vehicles && <span className="world-bus" title="Автобус №21 · Динская — Первореченское" style={{ left: worldMapX(busPos.x), top: worldMapZ(busPos.z) }}>А</span>}
               {networkPlayers.filter((player) => player.id !== profile.id).map((player) => <span className="world-coop-player" title={`${player.name} · ${player.role}`} key={`world-coop-${player.id}`} style={{ left: worldMapX(player.x), top: worldMapZ(player.z) }}>{player.name.slice(0, 1)}</span>)}
               <span className="world-player" title={profile.nickname} style={{ left: worldMapX(playerPos.x), top: worldMapZ(playerPos.z) }}>{profile.nickname.slice(0, 1).toUpperCase()}</span>
@@ -4642,18 +4897,18 @@ export default function SecurityConsoleGame() {
             {officeZone === "garage" && (
               <div className="office-room">
                 <div className="office-header">
-                  <div><small>Мастерская</small><h1>Гараж и старая «девятка»</h1></div>
-                  <span className="live-pill calm">Двигатель {carUpgrade + 1}/4</span>
+                  <div><small>Мастерская</small><h1>{currentVehicle ? `Гараж · ${VEHICLE_BY_ID[currentVehicle].name}` : "Пустой гараж"}</h1></div>
+                  <span className="live-pill calm">{currentVehicle ? `Двигатель ${carUpgrade + 1}/4` : "Нет автомобиля"}</span>
                 </div>
                 <p className="office-room-message">{officeMessage}</p>
                 <div className="garage-stage">
-                  <div className="garage-car"><i /><span /><b /></div>
+                  {currentVehicle ? <div className="garage-car"><i /><span /><b /></div> : <div className="garage-empty">Свободное место</div>}
                   <div>
                     <small>Состояние автомобиля</small>
-                    <h3>Топливо {carTelemetry.fuel.toFixed(2)} л / {FUEL_TANK_LITERS} л · износ {Math.round(carTelemetry.wear)}%</h3>
-                    <p>Улучшение повышает тягу и максимальную скорость. На грунте машина всё равно требует аккуратной работы рулём.</p>
-                    <button className="garage-upgrade" onClick={() => handleOfficeAction("upgrade")} disabled={carUpgrade >= 3}>
-                      {carUpgrade >= 3 ? "Максимальная комплектация" : `Установить улучшение · ${(7000 + carUpgrade * 4500).toLocaleString("ru-RU")} ₽`}
+                    <h3>{currentVehicle ? `Топливо ${carTelemetry.fuel.toFixed(2)} л / ${FUEL_TANK_LITERS} л · износ ${Math.round(carTelemetry.wear)}%` : "У вас нет автомобиля"}</h3>
+                    <p>{currentVehicle ? "Улучшение повышает тягу и максимальную скорость. На грунте машина всё равно требует аккуратной работы рулём." : "Купите автомобиль в автосалоне или пользуйтесь автобусом. Парковочное место останется свободным до первой покупки."}</p>
+                    <button className="garage-upgrade" onClick={() => currentVehicle ? handleOfficeAction("upgrade") : (setTabletTab("fleet"), setMode("tablet"))} disabled={Boolean(currentVehicle) && carUpgrade >= 3}>
+                      {currentVehicle ? carUpgrade >= 3 ? "Максимальная комплектация" : `Установить улучшение · ${(7000 + carUpgrade * 4500).toLocaleString("ru-RU")} ₽` : "Открыть автосалон"}
                     </button>
                   </div>
                 </div>
