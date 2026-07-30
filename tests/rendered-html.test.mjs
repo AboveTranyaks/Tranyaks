@@ -129,6 +129,28 @@ test("resets statistics safely and renders liters, traffic, lights, and utility 
   assert.match(styles, /\.tablet-content \.soft-btn/);
 });
 
+test("contains right-hand bus service, intermediate stop, greener vegetation, and two gas stations", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /const BUS_STOPS: BusStopSpec\[\]/);
+  assert.match(source, /name: "Трасса · промежуточная", x: 2000/);
+  assert.match(source, /const GAS_STATIONS = \[/);
+  assert.match(source, /АЗС «Первореченская»/);
+  assert.match(source, /АЗС «Динская»/);
+  assert.match(source, /function makeBus\(\)/);
+  assert.match(source, /busSpeed = 16\.67/);
+  assert.match(source, /bus\.position\.z = busDirection > 0 \? -3\.8 : 3\.8/);
+  assert.match(source, /trafficCar\.position\.set\([^;]+direction > 0 \? -3\.2 : 3\.2\)/);
+  assert.match(source, /group\.scale\.setScalar\(0\.6\)/);
+  assert.match(source, /new THREE\.InstancedMesh\(grassGeometry, mat\(0x4f9f43\), 3000\)/);
+  assert.doesNotMatch(source, /for \(let x = -88; x <= 88; x \+= 22\)/);
+  assert.match(styles, /\.service-modal/);
+  assert.match(styles, /\.world-bus/);
+});
+
 test("contains rotating daily challenges and cooperative room systems", async () => {
   const [source, styles] = await Promise.all([
     readFile(sourceUrl, "utf8"),
