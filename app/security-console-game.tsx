@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "pause" | "tariff" | "office" | "station" | "transit";
+type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "pause" | "tariff" | "office" | "station" | "transit" | "busRide";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
@@ -1460,6 +1460,7 @@ export default function SecurityConsoleGame() {
     player?: THREE.Group;
     car?: THREE.Group;
     bus?: THREE.Group;
+    busRider?: THREE.Group;
     scene?: THREE.Scene;
     camera?: THREE.PerspectiveCamera;
     renderer?: THREE.WebGLRenderer;
@@ -1541,6 +1542,13 @@ export default function SecurityConsoleGame() {
   const [busPos, setBusPos] = useState({ x: BUS_STOPS[0].x, z: -3.5 });
   const [busEtaMinutes, setBusEtaMinutes] = useState(0);
   const [busReadyAtStop, setBusReadyAtStop] = useState(false);
+  const [busRideStopIndex, setBusRideStopIndex] = useState<number | null>(null);
+  const [busStopChoice, setBusStopChoice] = useState(false);
+  const busStopChoiceRef = useRef(false);
+  const onBusRef = useRef(false);
+  const busOriginStopRef = useRef(0);
+  const busCurrentStopRef = useRef(0);
+  const busDirectionRef = useRef<1 | -1>(1);
   const [activeNpcId, setActiveNpcId] = useState<number | null>(null);
   const [residents, setResidents] = useState<Resident[]>(() => residentsFromSave(initialSave));
   const residentsRef = useRef<Resident[]>(residents);
@@ -1657,6 +1665,7 @@ export default function SecurityConsoleGame() {
   const [streetReputation, setStreetReputation] = useState<Record<number, number>>(initialSave.streetReputation ?? {});
   const streetReputationRef = useRef(streetReputation);
   const [activeStreetWalkerId, setActiveStreetWalkerId] = useState<number | null>(null);
+  const activeStreetWalkerIdRef = useRef<number | null>(null);
   const [streetTurn, setStreetTurn] = useState(0);
   const [streetLine, setStreetLine] = useState("");
   const [taxiTier, setTaxiTier] = useState<"economy" | "comfort" | "van">("economy");
@@ -2114,6 +2123,8 @@ export default function SecurityConsoleGame() {
     outfitRef.current = outfitId;
     const hero = engineRef.current.player;
     if (hero) applyOutfit(hero, OUTFIT_BY_ID[outfitId]);
+    const busRider = engineRef.current.busRider;
+    if (busRider) applyOutfit(busRider, OUTFIT_BY_ID[outfitId]);
   }, [outfitId]);
 
   useEffect(() => {
@@ -2610,14 +2621,28 @@ export default function SecurityConsoleGame() {
     const bus = makeBus();
     bus.position.set(BUS_STOPS[0].x, 0, laneZForDirection(1, 3.8));
     bus.rotation.y = Math.PI / 2;
+    const busRider = makeHero();
+    applyOutfit(busRider, OUTFIT_BY_ID[outfitRef.current]);
+    busRider.scale.setScalar(0.34);
+    busRider.position.set(0.78, 0.62, -1.35);
+    busRider.rotation.y = 0;
+    const riderLeftLeg = busRider.getObjectByName("leftLeg");
+    const riderRightLeg = busRider.getObjectByName("rightLeg");
+    if (riderLeftLeg) riderLeftLeg.rotation.x = -Math.PI / 2.7;
+    if (riderRightLeg) riderRightLeg.rotation.x = -Math.PI / 2.7;
+    busRider.visible = false;
+    bus.add(busRider);
     scene.add(bus);
     engine.bus = bus;
+    engine.busRider = busRider;
     let busDirection: 1 | -1 = 1;
     let busCurrentStop = 0;
     let busNextStop = 1;
     let busDwellGameHours = BUS_STOP_DWELL_GAME_MINUTES / 60;
     let lastBusGameTime = engine.time;
     let busServiceKey = "";
+    busDirectionRef.current = busDirection;
+    busCurrentStopRef.current = busCurrentStop;
 
     const passengerColors = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
     BUS_STOPS.forEach((stop, stopIndex) => {
@@ -2718,6 +2743,7 @@ export default function SecurityConsoleGame() {
         engine.keys.clear();
         setMode("world");
         setActiveStreetWalkerId(null);
+        activeStreetWalkerIdRef.current = null;
         return;
       }
       if (e.code === "Escape" && (modeRef.current === "station" || modeRef.current === "transit")) {
@@ -2725,6 +2751,10 @@ export default function SecurityConsoleGame() {
         setStationMenu(null);
         setTransitMenu(null);
         setMode("world");
+        return;
+      }
+      if (e.code === "KeyE" && modeRef.current === "transit" && !e.repeat) {
+        document.querySelector<HTMLButtonElement>(".bus-board-button:not(:disabled)")?.click();
         return;
       }
       if (e.code === "KeyE" && modeRef.current === "world" && !e.repeat) {
@@ -2785,7 +2815,20 @@ export default function SecurityConsoleGame() {
           return;
         }
         if (engine.nearestWalker) {
+          const walker = engine.nearestWalker;
+          const approach = walker.mesh.position.clone().sub(player.position);
+          approach.y = 0;
+          if (approach.lengthSq() < 0.01) approach.set(0, 0, 1);
+          approach.normalize();
+          walker.mesh.position.copy(player.position).addScaledVector(approach, 2.25);
+          walker.mesh.position.y = 0;
+          walker.mesh.rotation.y = Math.atan2(
+            player.position.x - walker.mesh.position.x,
+            player.position.z - walker.mesh.position.z,
+          );
+          personWalkCycle(walker.mesh, false, performance.now(), walker.id * 0.7);
           setActiveStreetWalkerId(engine.nearestWalker.id);
+          activeStreetWalkerIdRef.current = engine.nearestWalker.id;
           setStreetTurn(0);
           setStreetLine(`${engine.nearestWalker.name}: «Слышали последние новости? В посёлке снова обсуждают безопасность домов.»`);
           updateDailyChallengeRef.current("talks");
@@ -2913,7 +2956,8 @@ export default function SecurityConsoleGame() {
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       const canMove = modeRef.current === "world" || modeRef.current === "phone";
-      const focus = engine.driving ? car : player;
+      const ridingBus = onBusRef.current;
+      const focus = ridingBus ? bus : engine.driving ? car : player;
       let currentMovement: MovementState = "Покой";
       let currentWalkSpeedKmh = 0;
 
@@ -3161,6 +3205,15 @@ export default function SecurityConsoleGame() {
         if (marker) marker.position.y = 5.7 + Math.sin(now * 0.003 + i) * 0.18;
       });
       engine.walkers.forEach((walker, i) => {
+        const talking = modeRef.current === "street" && activeStreetWalkerIdRef.current === walker.id;
+        if (talking) {
+          walker.mesh.rotation.y = Math.atan2(
+            player.position.x - walker.mesh.position.x,
+            player.position.z - walker.mesh.position.z,
+          );
+          personWalkCycle(walker.mesh, false, now, i * 0.7);
+          return;
+        }
         const nextX = walker.mesh.position.x + walker.direction * walker.speed * dt;
         if (nextX <= walker.minX || nextX >= walker.maxX) {
           walker.direction = walker.direction === 1 ? -1 : 1;
@@ -3183,14 +3236,18 @@ export default function SecurityConsoleGame() {
           }
         });
       });
-      const busOperating = engine.time >= 6 && engine.time < 23;
-      const busClockActive = modeRef.current === "world";
+      const busOperating = (engine.time >= 6 && engine.time < 23) || onBusRef.current;
+      const busClockActive = modeRef.current === "world" || modeRef.current === "busRide";
       const busGameTimeDelta = busClockActive ? (engine.time - lastBusGameTime + 24) % 24 : 0;
       lastBusGameTime = engine.time;
       bus.visible = busOperating;
       if (busOperating) {
         if (busDwellGameHours > 0) {
           busDwellGameHours = Math.max(0, busDwellGameHours - busGameTimeDelta);
+          if (busDwellGameHours <= 0 && onBusRef.current && busStopChoiceRef.current) {
+            busStopChoiceRef.current = false;
+            setBusStopChoice(false);
+          }
           const serviceKey = `${busCurrentStop}:${busDirection}`;
           if (serviceKey !== busServiceKey) {
             busServiceKey = serviceKey;
@@ -3220,10 +3277,17 @@ export default function SecurityConsoleGame() {
           if (Math.abs(remaining) <= busSpeed * dt) {
             bus.position.x = targetX;
             busCurrentStop = busNextStop;
+            busCurrentStopRef.current = busCurrentStop;
             busDwellGameHours = BUS_STOP_DWELL_GAME_MINUTES / 60;
             if (busCurrentStop === BUS_STOPS.length - 1) busDirection = -1;
             if (busCurrentStop === 0) busDirection = 1;
+            busDirectionRef.current = busDirection;
             busNextStop = busCurrentStop + busDirection;
+            if (onBusRef.current) {
+              setBusRideStopIndex(busCurrentStop);
+              busStopChoiceRef.current = true;
+              setBusStopChoice(true);
+            }
           } else {
             bus.position.x += Math.sign(remaining) * busSpeed * dt;
             busServiceKey = "";
@@ -3289,8 +3353,8 @@ export default function SecurityConsoleGame() {
       }
 
       const target = focus.position.clone();
-      target.y += engine.driving ? 2.2 : 3.0;
-      const distance = engine.zoom + (engine.driving ? 4 : 0);
+      target.y += ridingBus ? 2.35 : engine.driving ? 2.2 : 3.0;
+      const distance = ridingBus ? Math.min(engine.zoom, 8.5) : engine.zoom + (engine.driving ? 4 : 0);
       const cameraOffset = new THREE.Vector3(
         Math.sin(engine.yaw) * Math.cos(engine.pitch) * distance,
         Math.sin(engine.pitch) * distance + 2,
@@ -3977,26 +4041,58 @@ export default function SecurityConsoleGame() {
     }, animated ? 3200 : 500);
   };
 
-  const rideBusTo = (destinationId: BusStopSpec["id"]) => {
-    if (!transitMenu || !busReadyAtStop) return;
-    const source = BUS_STOPS.find((stop) => stop.id === transitMenu);
-    const destination = BUS_STOPS.find((stop) => stop.id === destinationId);
-    if (!source || !destination || source.id === destination.id || !engineRef.current.player) return;
-    const intercity = (source.id === "pervorechenskoe" && destination.id === "dinskaya") || (source.id === "dinskaya" && destination.id === "pervorechenskoe");
-    const fare = intercity ? 150 : 50;
-    if (moneyRef.current < fare) {
-      flash(`Для поездки нужно ${fare} ₽`);
+  const boardBus = () => {
+    if (!transitMenu || !busReadyAtStop || !engineRef.current.player || !engineRef.current.busRider) return;
+    const stopIndex = BUS_STOPS.findIndex((stop) => stop.id === transitMenu);
+    if (stopIndex < 0 || stopIndex !== busCurrentStopRef.current) {
+      flash("Подождите, пока автобус полностью остановится у павильона");
       return;
     }
-    const nextMoney = moneyRef.current - fare;
+    if (moneyRef.current < 50) {
+      flash("Для поездки нужно минимум 50 ₽");
+      return;
+    }
+    onBusRef.current = true;
+    busOriginStopRef.current = stopIndex;
+    setBusRideStopIndex(stopIndex);
+    busStopChoiceRef.current = false;
+    setBusStopChoice(false);
+    engineRef.current.player.visible = false;
+    engineRef.current.busRider.visible = true;
+    setTransitMenu(null);
+    setMode("busRide");
+    flash("Вы заняли пассажирское место. Автобус отправится после стоянки.");
+  };
+
+  const continueBusRide = () => {
+    busStopChoiceRef.current = false;
+    setBusStopChoice(false);
+    flash("Едем дальше по маршруту");
+  };
+
+  const exitBus = () => {
+    const player = engineRef.current.player;
+    const rider = engineRef.current.busRider;
+    const stopIndex = busRideStopIndex ?? busCurrentStopRef.current;
+    const stop = BUS_STOPS[stopIndex];
+    if (!player || !rider || !stop) return;
+    const travelledStops = Math.abs(stopIndex - busOriginStopRef.current);
+    const fare = travelledStops >= 2 ? 150 : 50;
+    const nextMoney = Math.max(0, moneyRef.current - fare);
     moneyRef.current = nextMoney;
     setMoney(nextMoney);
-    engineRef.current.player.position.set(destination.x, 0, destination.z + (destination.z > 0 ? 5 : -5));
-    setPlayerPos({ x: destination.x, z: destination.z });
-    setTransitMenu(null);
+    rider.visible = false;
+    player.visible = true;
+    player.position.set(stop.x, 0, laneZForDirection(busDirectionRef.current, 15.4));
+    player.rotation.y = busDirectionRef.current > 0 ? Math.PI / 2 : -Math.PI / 2;
+    onBusRef.current = false;
+    busStopChoiceRef.current = false;
+    setBusStopChoice(false);
+    setBusRideStopIndex(null);
+    setPlayerPos({ x: player.position.x, z: player.position.z });
     setMode("world");
     persist(residentsRef.current, nextMoney, reputation);
-    flash(`Автобус прибыл: ${destination.name} · −${fare} ₽`);
+    flash(`Вы вышли: ${stop.name} · проезд ${fare} ₽`);
   };
 
   const buyStoreItem = (kind: "batteries" | "food" | "tools" | "book" | "leaflets" | "billboard" | "radio") => {
@@ -4134,6 +4230,7 @@ export default function SecurityConsoleGame() {
       window.setTimeout(() => {
         setMode("world");
         setActiveStreetWalkerId(null);
+        activeStreetWalkerIdRef.current = null;
         flash(delta > 0 ? `Уличная беседа · личная репутация +${delta}` : "Собеседник обиделся · личная репутация −1");
       }, 900);
     }
@@ -4634,13 +4731,41 @@ export default function SecurityConsoleGame() {
             </div>
             <div className="bus-route-list">
               {BUS_STOPS.map((stop, index) => (
-                <button key={stop.id} disabled={!busReadyAtStop || stop.id === transitMenu} onClick={() => rideBusTo(stop.id)}>
-                  <i>{index + 1}</i><span><b>{stop.name}</b><small>{stop.id === transitMenu ? "Вы здесь" : "Выбрать остановку"}</small></span>
-                </button>
+                <div className={stop.id === transitMenu ? "current" : ""} key={stop.id}>
+                  <i>{index + 1}</i><span><b>{stop.name}</b><small>{stop.id === transitMenu ? "Вы здесь" : "Следующая точка маршрута"}</small></span>
+                </div>
               ))}
             </div>
-            <footer><span>Правостороннее движение · двери открываются со стороны тротуара.</span><button onClick={() => { setTransitMenu(null); setMode("world"); }}>Не ехать</button></footer>
+            <footer>
+              <span>Правостороннее движение · поездка проходит в реальном мире без телепортации.</span>
+              <button className="bus-board-button" disabled={!busReadyAtStop} onClick={boardBus}>
+                {busReadyAtStop ? "E · Сесть на пассажирское место" : "Ждать автобус"}
+              </button>
+              <button onClick={() => { setTransitMenu(null); setMode("world"); }}>Не ехать</button>
+            </footer>
           </div>
+        </section>
+      )}
+
+      {mode === "busRide" && (
+        <section className="bus-ride-panel">
+          <small>Автобус №21 · пассажирское место</small>
+          <b>
+            {busStopChoice && busRideStopIndex !== null
+              ? `Остановка: ${BUS_STOPS[busRideStopIndex].name}`
+              : "Автобус следует по маршруту"}
+          </b>
+          <span>
+            {busStopChoice
+              ? "Двери открыты. Можно выйти или остаться в салоне."
+              : "Смотрите маршрут на миникарте. Следующая остановка появится после фактического прибытия."}
+          </span>
+          {busStopChoice && (
+            <div>
+              <button onClick={exitBus}>Выйти здесь</button>
+              <button className="primary" onClick={continueBusRide}>Ехать дальше</button>
+            </div>
+          )}
         </section>
       )}
 
@@ -4757,7 +4882,7 @@ export default function SecurityConsoleGame() {
               <button onClick={() => handleStreetReply("friendly")}><b>Поддержать разговор по-соседски</b><small>Доброжелательный ответ · личная репутация +1</small></button>
               <button onClick={() => handleStreetReply("poor")}><b>Ответить резко и закончить разговор</b><small>Собеседник обидится · личная репутация −1</small></button>
             </div>
-            <footer><span>{(streetReputation[activeStreetWalker.id] ?? 0) >= 10 ? "★ Адвокат: рекомендует вас соседям" : "При 10 очках житель начнёт рекомендовать вашу фирму"}</span><button onClick={() => { setMode("world"); setActiveStreetWalkerId(null); }}>Esc · Уйти</button></footer>
+            <footer><span>{(streetReputation[activeStreetWalker.id] ?? 0) >= 10 ? "★ Адвокат: рекомендует вас соседям" : "При 10 очках житель начнёт рекомендовать вашу фирму"}</span><button onClick={() => { setMode("world"); setActiveStreetWalkerId(null); activeStreetWalkerIdRef.current = null; }}>Esc · Уйти</button></footer>
           </div>
         </section>
       )}

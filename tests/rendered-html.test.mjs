@@ -195,7 +195,7 @@ test("keeps drivers below the roof and dwells for five game minutes", async () =
 
   assert.match(source, /const BUS_STOP_DWELL_GAME_MINUTES = 5/);
   assert.match(source, /busDwellGameHours = BUS_STOP_DWELL_GAME_MINUTES \/ 60/);
-  assert.match(source, /const busClockActive = modeRef\.current === "world"/);
+  assert.match(source, /const busClockActive = modeRef\.current === "world" \|\| modeRef\.current === "busRide"/);
   assert.match(source, /const busGameTimeDelta = busClockActive \?/);
   assert.match(source, /Стоянка длится 5 игровых минут/);
   assert.match(source, /driver\.position\.set\(-0\.68, -0\.62, 0\.38\)/);
@@ -278,4 +278,24 @@ test("adds pole collisions and high-contrast alarm controls", async () => {
   assert.match(styles, /\.alarm-card \.alarm-countdown \{ color: #8f431f/);
   assert.match(styles, /\.alarm-card \.alarm-action\.danger \{ color: #9f3024/);
   assert.match(styles, /background: #fff8f5/);
+});
+
+test("stops street NPCs for dialogue and provides physical bus rides", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /activeStreetWalkerIdRef\.current === walker\.id/);
+  assert.match(source, /personWalkCycle\(walker\.mesh, false/);
+  assert.match(source, /walker\.mesh\.position\.copy\(player\.position\)\.addScaledVector\(approach, 2\.25\)/);
+  assert.match(source, /const boardBus = \(\) =>/);
+  assert.match(source, /engineRef\.current\.busRider\.visible = true/);
+  assert.match(source, /setMode\("busRide"\)/);
+  assert.match(source, /const focus = ridingBus \? bus/);
+  assert.match(source, /setBusStopChoice\(true\)/);
+  assert.match(source, /Выйти здесь/);
+  assert.match(source, /Ехать дальше/);
+  assert.doesNotMatch(source, /const rideBusTo/);
+  assert.match(styles, /\.bus-ride-panel/);
 });
