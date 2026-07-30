@@ -143,6 +143,7 @@ test("contains right-hand bus service, intermediate stop, greener vegetation, an
   assert.match(source, /function makeBus\(\)/);
   assert.match(source, /busSpeed = 16\.67/);
   assert.match(source, /const DRIVING_SIDE: DrivingSide = "right"/);
+  assert.match(source, /DRIVING_SIDE === "right"\s+\? direction > 0\s+\? offset\s+: -offset/);
   assert.match(source, /laneZForDirection\(busDirection, 3\.8\)/);
   assert.match(source, /civilianTrafficDirectionForLane\(laneZ\)/);
   assert.match(source, /const laneZ = i % 2 === 0 \? -3\.2 : 3\.2/);
@@ -194,11 +195,20 @@ test("keeps drivers below the roof and dwells for five game minutes", async () =
 
   assert.match(source, /const BUS_STOP_DWELL_GAME_MINUTES = 5/);
   assert.match(source, /busDwellGameHours = BUS_STOP_DWELL_GAME_MINUTES \/ 60/);
+  assert.match(source, /const busClockActive = modeRef\.current === "world"/);
+  assert.match(source, /const busGameTimeDelta = busClockActive \?/);
   assert.match(source, /Стоянка длится 5 игровых минут/);
   assert.match(source, /driver\.position\.set\(-0\.68, -0\.62, 0\.38\)/);
   assert.match(source, /Left-hand steering wheel for right-hand traffic/);
-  assert.match(source, /door\.position\.set\(1\.15, 1\.48, 4\.66\)/);
+  assert.match(source, /door\.position\.set\(-1\.15, 1\.48, 4\.66\)/);
   assert.match(source, /drivingSide: DRIVING_SIDE/);
+});
+
+test("keeps country-road crossings below the main asphalt", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /box\(scene, \[4300, 0\.18, 14\], \[1950, 0\.1, 0\]/);
+  assert.match(source, /box\(scene, \[13, 0\.12, 350\], \[centreX \+ 18, 0\.08, 15\]/);
 });
 
 test("contains rotating daily challenges and cooperative room systems", async () => {
