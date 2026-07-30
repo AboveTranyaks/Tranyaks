@@ -3296,6 +3296,22 @@ kbd {
   accent-color: #cce86b;
 }
 
+.audio-settings-title {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+  padding: 12px;
+  border-left: 3px solid #cce86b;
+  border-radius: 0 12px 12px 0;
+  background: rgba(204, 232, 107, 0.1);
+}
+
+.audio-settings-title span {
+  color: #b8c7be;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .phone-settings > button {
   place-items: center;
   color: #1c392b;
