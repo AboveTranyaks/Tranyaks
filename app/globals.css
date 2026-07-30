@@ -3098,6 +3098,51 @@ kbd {
   background: rgba(204, 232, 107, 0.16);
 }
 
+.stream-radio {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid rgba(204, 232, 107, 0.35);
+  border-radius: 14px;
+  background: rgba(10, 22, 18, 0.68);
+}
+
+.stream-radio > div {
+  display: grid;
+  gap: 3px;
+}
+
+.stream-radio span,
+.stream-radio small,
+.stream-radio em {
+  color: #b8c7be;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.stream-radio em {
+  font-style: normal;
+  opacity: 0.78;
+}
+
+.stream-radio input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+}
+
+.stream-radio button {
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: #cce86b;
+  color: #19372a;
+  font-weight: 900;
+}
+
 .taxi-tiers span,
 .taxi-tiers small,
 .phone-radio button span {
