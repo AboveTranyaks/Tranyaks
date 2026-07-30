@@ -2905,9 +2905,49 @@ export default function SecurityConsoleGame() {
     box(scene, [2.2, 3.2, 0.3], [4000, 1.65, -17.85], 0x6e4c35);
     box(scene, [24, 7.2, 13], [3928, 3.6, 42], 0xd4ca98);
     box(scene, [25.5, 1.2, 14.5], [3928, 7.35, 42], 0x557d68);
+
+    const addDinskayaBuilding = (x: number, z: number, width: number, depth: number, wall: number, roof: number) => {
+      box(scene, [width, 6.2, depth], [x, 3.1, z], wall);
+      box(scene, [width + 1.4, 0.85, depth + 1.4], [x, 6.6, z], roof);
+      box(scene, [2.1, 3.1, 0.28], [x, 1.58, z - depth / 2 - 0.02], 0x6e4c35);
+      for (const windowX of [-width * 0.28, width * 0.28]) {
+        const windowMaterial = new THREE.MeshStandardMaterial({
+          color: 0x9ed4dc,
+          emissive: 0xffd78a,
+          emissiveIntensity: 0.05,
+          roughness: 0.32,
+        });
+        const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(2.35, 1.75, 0.22), windowMaterial);
+        windowMesh.name = "window";
+        windowMesh.position.set(x + windowX, 3.15, z - depth / 2 - 0.04);
+        windowMesh.castShadow = true;
+        scene.add(windowMesh);
+        windowMaterials.push(windowMaterial);
+      }
+      engine.colliders.push({ x, z, halfX: width / 2 + 0.5, halfZ: depth / 2 + 0.5, kind: "landmark" });
+    };
+
+    // Dinskaya services and public spaces: clinic, cafe, market, fire station
+    // and a landscaped playground make the settlement feel inhabited.
+    addDinskayaBuilding(4058, 44, 17, 11, 0xe5ddd0, 0x7392a0);
+    addDinskayaBuilding(3972, 92, 15, 10, 0xd69a75, 0x7b5547);
+    addDinskayaBuilding(3970, -98, 20, 12, 0xd8bd72, 0x59755f);
+    addDinskayaBuilding(4055, -98, 23, 13, 0xc97866, 0x75514b);
+    box(scene, [22, 0.2, 18], [3990, 0.2, 126], 0xb9a77e);
+    box(scene, [4.8, 0.28, 2.8], [3985, 0.38, 126], 0xd2c39e);
+    box(scene, [0.28, 3.5, 0.28], [3983.2, 1.8, 126], 0x49685a);
+    box(scene, [0.28, 3.5, 0.28], [3986.8, 1.8, 126], 0x49685a);
+    box(scene, [4.2, 0.25, 0.25], [3985, 3.4, 126], 0x49685a);
+    box(scene, [3.1, 0.3, 1.1], [3985, 1.05, 125.1], 0xe38b58, 0.12);
+    addStreetBench(3996, 126, -Math.PI / 2);
+    addStreetBench(4080, 108, Math.PI);
+    for (const [treeX, treeZ] of [[3979, 119], [4001, 119], [4072, 102], [4088, 102], [4080, 118]] as [number, number][]) {
+      makeTree(scene, treeX, treeZ, 0.82);
+    }
     engine.colliders.push(
       { x: 4000, z: -24, halfX: 9.5, halfZ: 6.5, kind: "landmark" },
       { x: 3928, z: 42, halfX: 12.5, halfZ: 7, kind: "landmark" },
+      { x: 3990, z: 126, halfX: 11, halfZ: 9, kind: "landmark" },
     );
 
     // Distinct service centres make the two unlockable districts readable from the road.
@@ -2995,7 +3035,8 @@ export default function SecurityConsoleGame() {
     const walkerColors = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
     const walkerNames = ["Надежда", "Игорь", "Тамара", "Роман", "Людмила", "Аркадий", "Вера", "Михаил", "Лариса", "Степан", "Инна", "Виктор"];
     for (const villageX of [0, 4000]) {
-      for (let i = 0; i < 12; i++) {
+      const walkerCount = villageX === 4000 ? 30 : 12;
+      for (let i = 0; i < walkerCount; i++) {
         const walkerId = (villageX === 0 ? 100 : 200) + i;
         const walker = makePerson(walkerColors[i % walkerColors.length]);
         const pedestrianDistrict = villageX === 0 ? DISTRICTS[0] : DISTRICTS[3];
@@ -3020,7 +3061,7 @@ export default function SecurityConsoleGame() {
         scene.add(walker);
         engine.walkers.push({
           id: walkerId,
-          name: walkerNames[i],
+          name: walkerNames[i % walkerNames.length],
           mesh: walker,
           minX,
           maxX,
@@ -3031,6 +3072,7 @@ export default function SecurityConsoleGame() {
         });
       }
     }
+    console.info("[NPCSpawner] Станица Динская: создано 30 уличных NPC");
 
     const trafficColors = [0x587e91, 0xd39a4b, 0x6f8c68, 0x8b6688, 0xc65d4d, 0xd4d0bd];
     for (let i = 0; i < 14; i++) {

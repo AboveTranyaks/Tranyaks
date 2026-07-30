@@ -341,3 +341,15 @@ test("supports licensed custom radio streams with resilient offline fallback and
   assert.match(source, /playAmbientDetail/);
   assert.match(styles, /\.stream-radio/);
 });
+
+test("populates Dinskaya with thirty street NPCs and public landmarks", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /const walkerCount = villageX === 4000 \? 30 : 12/);
+  assert.match(source, /Станица Динская: создано 30 уличных NPC/);
+  assert.match(source, /addDinskayaBuilding\(4058, 44/);
+  assert.match(source, /addDinskayaBuilding\(3972, 92/);
+  assert.match(source, /addDinskayaBuilding\(3970, -98/);
+  assert.match(source, /addDinskayaBuilding\(4055, -98/);
+  assert.match(source, /addStreetBench\(4080, 108/);
+});
