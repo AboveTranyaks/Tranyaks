@@ -9,6 +9,7 @@ type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
 type SurfaceKind = "Асфальт" | "Грунт" | "Трава";
+type WalkSurfaceKind = "Плитка" | "Декоративная плитка" | "Тротуарный асфальт" | "Бетон" | "Гравий" | "Грязь" | "Трава" | "Проезжая часть";
 type MovementState = "Покой" | "Шаг" | "Быстрый шаг" | "Бег трусцой";
 type TabletTab = "hero" | "quests" | "wardrobe" | "clients" | "contracts" | "development" | "fleet" | "shops" | "finance" | "profile" | "rating" | "saves";
 type SaveSlotId = "auto" | "slot1" | "slot2" | "slot3";
@@ -20,6 +21,31 @@ type DrivingSide = "right" | "left";
 type PhoneApp = "home" | "taxi" | "contacts" | "notifications" | "camera" | "radio" | "notes" | "settings";
 type PhoneTheme = "dark" | "light";
 type PhoneWallpaper = "village" | "night" | "forest";
+
+type AudioMix = {
+  master: number;
+  music: number;
+  radio: number;
+  ambient: number;
+  sfx: number;
+  alerts: number;
+  voice: number;
+};
+
+type ProceduralAudioEngine = {
+  context: AudioContext;
+  master: GainNode;
+  music: GainNode;
+  radio: GainNode;
+  ambient: GainNode;
+  sfx: GainNode;
+  alerts: GainNode;
+  voice: GainNode;
+  wind: OscillatorNode;
+  windLevel: GainNode;
+  radioTone: OscillatorNode;
+  radioLevel: GainNode;
+};
 
 type StaffState = {
   dispatchers: number;
@@ -172,6 +198,7 @@ type SaveData = {
   phoneWallpaper?: PhoneWallpaper;
   phoneVolume?: number;
   uiScale?: number;
+  audioMix?: AudioMix;
 };
 
 type SaveEnvelope = {
@@ -331,6 +358,23 @@ const DISTRICTS: DistrictSpec[] = [
   { id: "industrial", name: "Промышленный район", subtitle: "Склады и производства", x: 2700, reputation: 45, contracts: 35, openingCost: 35000, monthlyRent: 9000, color: "#88929b" },
   { id: "elite", name: "Элитный район", subtitle: "ст. Динская", x: 4000, reputation: 65, contracts: 50, openingCost: 50000, monthlyRent: 12000, color: "#b99c79" },
 ];
+
+const DEFAULT_AUDIO_MIX: AudioMix = {
+  master: 70,
+  music: 45,
+  radio: 55,
+  ambient: 65,
+  sfx: 75,
+  alerts: 80,
+  voice: 70,
+};
+
+const SIDEWALK_PROFILES: Record<DistrictId, { surface: WalkSurfaceKind; width: number; speed: number; color: number }> = {
+  central: { surface: "Плитка", width: 3, speed: 1, color: 0xb7afa3 },
+  residential: { surface: "Тротуарный асфальт", width: 1.8, speed: 0.95, color: 0x777b79 },
+  industrial: { surface: "Бетон", width: 2, speed: 0.9, color: 0x9a9b94 },
+  elite: { surface: "Декоративная плитка", width: 4, speed: 1.05, color: 0xc7a982 },
+};
 
 const RESIDENTIAL_PRICES = [
   { type: "Частный дом", install: [3000, 15000] as [number, number], monthly: [500, 3000] as [number, number] },
@@ -727,6 +771,7 @@ const DEFAULT_SAVE: SaveData = {
   phoneWallpaper: "village",
   phoneVolume: 70,
   uiScale: 1,
+  audioMix: DEFAULT_AUDIO_MIX,
 };
 
 function checksum(data: SaveData) {
@@ -776,6 +821,15 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
     phoneWallpaper: value?.phoneWallpaper === "night" || value?.phoneWallpaper === "forest" ? value.phoneWallpaper : "village",
     phoneVolume: clamp(value?.phoneVolume ?? 70, 0, 100),
     uiScale: clamp(value?.uiScale ?? 1, 0.8, 1.5),
+    audioMix: {
+      master: clamp(value?.audioMix?.master ?? DEFAULT_AUDIO_MIX.master, 0, 100),
+      music: clamp(value?.audioMix?.music ?? DEFAULT_AUDIO_MIX.music, 0, 100),
+      radio: clamp(value?.audioMix?.radio ?? DEFAULT_AUDIO_MIX.radio, 0, 100),
+      ambient: clamp(value?.audioMix?.ambient ?? DEFAULT_AUDIO_MIX.ambient, 0, 100),
+      sfx: clamp(value?.audioMix?.sfx ?? DEFAULT_AUDIO_MIX.sfx, 0, 100),
+      alerts: clamp(value?.audioMix?.alerts ?? DEFAULT_AUDIO_MIX.alerts, 30, 100),
+      voice: clamp(value?.audioMix?.voice ?? DEFAULT_AUDIO_MIX.voice, 0, 100),
+    },
     carFuel: value?.carFuel === undefined ? (ownedVehicles.length > 0 ? 20 : 0) : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
 }
@@ -844,6 +898,49 @@ function surfaceAt(x: number, z: number): SurfaceKind {
     if (Math.abs(x - centre) <= 132 && (Math.abs(z - 72) <= 6 || Math.abs(z + 72) <= 5.5)) return "Грунт";
   }
   return "Трава";
+}
+
+function nearestDistrictAt(x: number) {
+  return DISTRICTS.reduce((closest, district) =>
+    Math.abs(x - district.x) < Math.abs(x - closest.x) ? district : closest,
+  );
+}
+
+function sidewalkCenterZ(profile: (typeof SIDEWALK_PROFILES)[DistrictId]) {
+  return 7.25 + profile.width / 2;
+}
+
+function pedestrianSurfaceAt(x: number, z: number): { surface: WalkSurfaceKind; speed: number; energy: number; onSidewalk: boolean } {
+  const district = nearestDistrictAt(x);
+  const profile = SIDEWALK_PROFILES[district.id];
+  const withinDistrict = Math.abs(x - district.x) <= 175;
+  const mainSidewalk = withinDistrict && Math.abs(Math.abs(z) - sidewalkCenterZ(profile)) <= profile.width / 2 + 0.35;
+  const verticalSidewalk =
+    withinDistrict &&
+    Math.abs(z - 15) < 178 &&
+    Math.abs(Math.abs(x - (district.x + 18)) - 7.6) <= profile.width / 2 + 0.25;
+  const horizontalSidewalk =
+    withinDistrict &&
+    Math.abs(x - district.x) <= 135 &&
+    (Math.abs(Math.abs(z) - 78.4) <= profile.width / 2 + 0.3 || Math.abs(Math.abs(z) - 66) <= profile.width / 2 + 0.3);
+
+  if (mainSidewalk || verticalSidewalk || horizontalSidewalk) {
+    const ruralEdge = district.id === "central" && Math.abs(x - district.x) > 85;
+    return ruralEdge
+      ? { surface: "Гравий", speed: 0.85, energy: 0.9, onSidewalk: true }
+      : { surface: profile.surface, speed: profile.speed, energy: 0.9, onSidewalk: true };
+  }
+  if (Math.abs(z) <= 7 || Math.abs(x - (district.x + 18)) <= 6.6) {
+    return { surface: "Проезжая часть", speed: 0.8, energy: 1.2, onSidewalk: false };
+  }
+  const vehicleSurface = surfaceAt(x, z);
+  if (vehicleSurface === "Грунт") return { surface: "Гравий", speed: 0.85, energy: 1.2, onSidewalk: false };
+  return { surface: "Трава", speed: 0.85, energy: 1.2, onSidewalk: false };
+}
+
+function isPedestrianCrossing(x: number, z: number) {
+  if (Math.abs(z) > 7.2) return false;
+  return DISTRICTS.some((district) => Math.abs(x - (district.x + 18)) <= 4.2);
 }
 
 function readSave(): SaveData {
@@ -1480,9 +1577,11 @@ export default function SecurityConsoleGame() {
     walkers: Walker[];
     traffic: TrafficVehicle[];
     busPassengers: BusPassenger[];
+    benches: THREE.Vector3[];
     remoteMeshes: Map<string, THREE.Group>;
     nearest: Resident | null;
     nearestWalker: Walker | null;
+    nearestBench: THREE.Vector3 | null;
     time: number;
     yaw: number;
     pitch: number;
@@ -1505,9 +1604,11 @@ export default function SecurityConsoleGame() {
     walkers: [],
     traffic: [],
     busPassengers: [],
+    benches: [],
     remoteMeshes: new Map(),
     nearest: null,
     nearestWalker: null,
+    nearestBench: null,
     time: 8.25,
     yaw: Math.PI,
     pitch: 0.52,
@@ -1536,6 +1637,7 @@ export default function SecurityConsoleGame() {
   const [nearestWalker, setNearestWalker] = useState<Walker | null>(null);
   const [nearStationId, setNearStationId] = useState<string | null>(null);
   const [nearBusStopId, setNearBusStopId] = useState<BusStopSpec["id"] | null>(null);
+  const [nearBench, setNearBench] = useState(false);
   const [stationMenu, setStationMenu] = useState<(typeof GAS_STATIONS)[number]["id"] | null>(null);
   const [transitMenu, setTransitMenu] = useState<BusStopSpec["id"] | null>(null);
   const [serviceBusy, setServiceBusy] = useState("");
@@ -1563,6 +1665,7 @@ export default function SecurityConsoleGame() {
   const weatherRef = useRef<WeatherKind>(initialSave.weather ?? "Ясно");
   const [movementState, setMovementState] = useState<MovementState>("Покой");
   const [playerSpeedKmh, setPlayerSpeedKmh] = useState(0);
+  const [walkSurface, setWalkSurface] = useState<WalkSurfaceKind>("Плитка");
   const [carTelemetry, setCarTelemetry] = useState({ speed: 0, fuel: initialSave.carFuel ?? 0, surface: "Асфальт" as SurfaceKind, wear: initialSave.carWear ?? 0 });
   const [outfitId, setOutfitId] = useState<OutfitId>(initialOutfit);
   const outfitRef = useRef<OutfitId>(initialOutfit);
@@ -1660,6 +1763,11 @@ export default function SecurityConsoleGame() {
   const [phoneNoteDraft, setPhoneNoteDraft] = useState("");
   const [uiScale, setUiScale] = useState(clamp(initialSave.uiScale ?? 1, 0.8, 1.5));
   const uiScaleRef = useRef(uiScale);
+  const [audioMix, setAudioMix] = useState<AudioMix>(initialSave.audioMix ?? DEFAULT_AUDIO_MIX);
+  const audioMixRef = useRef(audioMix);
+  const audioEngineRef = useRef<ProceduralAudioEngine | null>(null);
+  const lastFootstepAtRef = useRef(0);
+  const benchRestUntilRef = useRef(0);
   const [contactedResidents, setContactedResidents] = useState<number[]>(initialSave.contactedResidents ?? []);
   const contactedResidentsRef = useRef(contactedResidents);
   const [streetReputation, setStreetReputation] = useState<Record<number, number>>(initialSave.streetReputation ?? {});
@@ -1777,6 +1885,7 @@ export default function SecurityConsoleGame() {
         phoneWallpaper: phoneWallpaperRef.current,
         phoneVolume: phoneVolumeRef.current,
         uiScale: uiScaleRef.current,
+        audioMix: audioMixRef.current,
       };
       const envelope = writeEnvelope(slot, saveName, save);
       setSaveSlots((current) => ({ ...current, [slot]: envelope }));
@@ -1832,6 +1941,131 @@ export default function SecurityConsoleGame() {
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  const applyAudioMix = useCallback((mix: AudioMix) => {
+    const audio = audioEngineRef.current;
+    if (!audio) return;
+    const now = audio.context.currentTime;
+    audio.master.gain.setTargetAtTime(mix.master / 100, now, 0.04);
+    audio.music.gain.setTargetAtTime(mix.music / 100, now, 0.04);
+    audio.radio.gain.setTargetAtTime(mix.radio / 100, now, 0.04);
+    audio.ambient.gain.setTargetAtTime(mix.ambient / 100, now, 0.04);
+    audio.sfx.gain.setTargetAtTime(mix.sfx / 100, now, 0.04);
+    audio.alerts.gain.setTargetAtTime(Math.max(0.3, mix.alerts / 100), now, 0.04);
+    audio.voice.gain.setTargetAtTime(mix.voice / 100, now, 0.04);
+  }, []);
+
+  const ensureAudio = useCallback(() => {
+    let audio = audioEngineRef.current;
+    if (audio) {
+      if (audio.context.state === "suspended") void audio.context.resume();
+      return audio;
+    }
+    const context = new AudioContext();
+    const master = context.createGain();
+    const music = context.createGain();
+    const radio = context.createGain();
+    const ambient = context.createGain();
+    const sfx = context.createGain();
+    const alerts = context.createGain();
+    const voice = context.createGain();
+    for (const group of [music, radio, ambient, sfx, alerts, voice]) group.connect(master);
+    master.connect(context.destination);
+
+    const wind = context.createOscillator();
+    const windFilter = context.createBiquadFilter();
+    const windLevel = context.createGain();
+    wind.type = "sawtooth";
+    wind.frequency.value = 46;
+    windFilter.type = "lowpass";
+    windFilter.frequency.value = 150;
+    windLevel.gain.value = 0.012;
+    wind.connect(windFilter).connect(windLevel).connect(ambient);
+    wind.start();
+
+    const radioTone = context.createOscillator();
+    const radioFilter = context.createBiquadFilter();
+    const radioLevel = context.createGain();
+    radioTone.type = "triangle";
+    radioTone.frequency.value = 110;
+    radioFilter.type = "lowpass";
+    radioFilter.frequency.value = 900;
+    radioLevel.gain.value = 0;
+    radioTone.connect(radioFilter).connect(radioLevel).connect(radio);
+    radioTone.start();
+
+    audio = { context, master, music, radio, ambient, sfx, alerts, voice, wind, windLevel, radioTone, radioLevel };
+    audioEngineRef.current = audio;
+    applyAudioMix(audioMixRef.current);
+    return audio;
+  }, [applyAudioMix]);
+
+  const playFootstep = useCallback((surface: WalkSurfaceKind) => {
+    const audio = ensureAudio();
+    const { context } = audio;
+    const now = context.currentTime;
+    const hardFrequency =
+      surface === "Плитка" || surface === "Декоративная плитка"
+        ? 520
+        : surface === "Бетон"
+          ? 230
+          : surface === "Тротуарный асфальт" || surface === "Проезжая часть"
+            ? 145
+            : 0;
+    if (hardFrequency) {
+      const oscillator = context.createOscillator();
+      const level = context.createGain();
+      oscillator.type = surface.includes("Плитка") ? "triangle" : "sine";
+      oscillator.frequency.setValueAtTime(hardFrequency, now);
+      oscillator.frequency.exponentialRampToValueAtTime(Math.max(70, hardFrequency * 0.42), now + 0.065);
+      level.gain.setValueAtTime(0.055, now);
+      level.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
+      oscillator.connect(level).connect(audio.sfx);
+      oscillator.start(now);
+      oscillator.stop(now + 0.08);
+      return;
+    }
+    const length = Math.floor(context.sampleRate * 0.09);
+    const buffer = context.createBuffer(1, length, context.sampleRate);
+    const channel = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      const envelope = 1 - i / length;
+      channel[i] = (Math.random() * 2 - 1) * envelope * (surface === "Гравий" ? 0.7 : 0.34);
+    }
+    const source = context.createBufferSource();
+    const filter = context.createBiquadFilter();
+    const level = context.createGain();
+    source.buffer = buffer;
+    filter.type = surface === "Гравий" ? "highpass" : "lowpass";
+    filter.frequency.value = surface === "Гравий" ? 900 : 420;
+    level.gain.value = 0.09;
+    source.connect(filter).connect(level).connect(audio.sfx);
+    source.start(now);
+  }, [ensureAudio]);
+
+  useEffect(() => {
+    applyAudioMix(audioMix);
+  }, [applyAudioMix, audioMix]);
+
+  useEffect(() => {
+    const audio = audioEngineRef.current;
+    if (!audio) return;
+    const frequencies: Record<string, number> = {
+      "Ретро FM": 146.83,
+      "Дорожное радио": 174.61,
+      "Вести посёлка": 123.47,
+      "Пультовая волна": 98,
+      "Lo‑Fi Beats": 110,
+    };
+    const now = audio.context.currentTime;
+    const busRadio = mode === "busRide";
+    audio.radioTone.frequency.setTargetAtTime(busRadio ? 146.83 : frequencies[radioStation] ?? 110, now, 0.3);
+    audio.radioLevel.gain.setTargetAtTime(
+      busRadio ? 0.009 : radioPlaying ? 0.026 * (phoneVolume / 100) : 0,
+      now,
+      0.15,
+    );
+  }, [mode, phoneVolume, radioPlaying, radioStation]);
 
   useEffect(() => {
     let dpadUpPressed = false;
@@ -1901,9 +2135,10 @@ export default function SecurityConsoleGame() {
     phoneVolumeRef.current = phoneVolume;
     phoneNotesRef.current = phoneNotes;
     uiScaleRef.current = uiScale;
+    audioMixRef.current = audioMix;
     contactedResidentsRef.current = contactedResidents;
     streetReputationRef.current = streetReputation;
-  }, [contactedResidents, phoneNotes, phoneTheme, phoneVolume, phoneWallpaper, streetReputation, uiScale]);
+  }, [audioMix, contactedResidents, phoneNotes, phoneTheme, phoneVolume, phoneWallpaper, streetReputation, uiScale]);
 
   useEffect(() => {
     networkPlayersRef.current = networkPlayers;
@@ -2244,6 +2479,7 @@ export default function SecurityConsoleGame() {
     engine.walkers = [];
     engine.traffic = [];
     engine.busPassengers = [];
+    engine.benches = [];
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 420), mat(0x78ad5d));
     ground.rotation.x = -Math.PI / 2;
@@ -2263,6 +2499,97 @@ export default function SecurityConsoleGame() {
       box(scene, [13, 0.12, 350], [centreX + 18, 0.08, 15], 0xb7ad98);
       box(scene, [260, 0.12, 10], [centreX, 0.08, 72], 0xb7ad98);
       box(scene, [220, 0.12, 9], [centreX, 0.08, -72], 0xc2ae8a);
+    }
+
+    const addStreetBench = (x: number, z: number, rotation = 0) => {
+      const bench = new THREE.Group();
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.24, 0.72), mat(0x8d6744));
+      seat.position.y = 0.72;
+      const back = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.8, 0.18), mat(0x78563c));
+      back.position.set(0, 1.1, 0.35);
+      for (const legX of [-0.95, 0.95]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.72, 0.16), mat(0x3d4743));
+        leg.position.set(legX, 0.36, 0);
+        bench.add(leg);
+      }
+      bench.add(seat, back);
+      bench.position.set(x, 0, z);
+      bench.rotation.y = rotation;
+      bench.traverse((part) => {
+        if (part instanceof THREE.Mesh) {
+          part.castShadow = true;
+          part.receiveShadow = true;
+        }
+      });
+      scene.add(bench);
+      engine.benches.push(new THREE.Vector3(x, 0, z));
+    };
+
+    // Raised pedestrian infrastructure generated alongside every district road.
+    for (const district of DISTRICTS) {
+      const profile = SIDEWALK_PROFILES[district.id];
+      const centreZ = sidewalkCenterZ(profile);
+      for (const sign of [-1, 1]) {
+        box(scene, [340, 0.22, profile.width], [district.x, 0.24, sign * centreZ], profile.color);
+        box(scene, [340, 0.34, 0.24], [district.x, 0.25, sign * 7.18], 0xd4d0c4);
+        if (district.id === "central") {
+          box(scene, [84, 0.235, profile.width], [district.x - 128, 0.255, sign * centreZ], 0x9f906f);
+          box(scene, [84, 0.235, profile.width], [district.x + 128, 0.255, sign * centreZ], 0x9f906f);
+        }
+      }
+      const verticalOffset = 6.75 + profile.width / 2;
+      for (const sign of [-1, 1]) {
+        box(scene, [profile.width, 0.22, 340], [district.x + 18 + sign * verticalOffset, 0.21, 15], profile.color);
+      }
+      const horizontalOffset = 5.15 + profile.width / 2;
+      for (const roadZ of [-72, 72]) {
+        for (const sign of [-1, 1]) {
+          box(scene, [270, 0.22, profile.width], [district.x, 0.21, roadZ + sign * horizontalOffset], profile.color);
+        }
+      }
+
+      // Zebra crossing: traffic AI checks the same four locations and yields.
+      const crossingX = district.x + 18;
+      for (let stripe = -3; stripe <= 3; stripe++) {
+        box(scene, [0.62, 0.035, 11.8], [crossingX + stripe * 1.05, 0.225, 0], 0xf2efe4);
+      }
+
+      if (district.id === "central" || district.id === "elite") {
+        for (let joint = -160; joint <= 160; joint += 6) {
+          for (const sign of [-1, 1]) {
+            box(scene, [0.08, 0.016, profile.width - 0.18], [district.x + joint, 0.365, sign * centreZ], 0x8d8b82);
+          }
+        }
+      }
+      if (district.id === "industrial") {
+        for (let joint = -150; joint <= 150; joint += 12) {
+          for (const sign of [-1, 1]) {
+            box(scene, [0.1, 0.016, profile.width - 0.14], [district.x + joint, 0.365, sign * centreZ], 0x6f736f);
+          }
+        }
+      }
+
+      if (district.id === "central" || district.id === "elite") {
+        addStreetBench(district.x - 58, centreZ + 1.55, Math.PI);
+        addStreetBench(district.x + 62, -centreZ - 1.55, 0);
+        for (const binX of [district.x - 52, district.x + 56]) {
+          const bin = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.85, 8), mat(0x40584d));
+          bin.position.set(binX, 0.48, centreZ + 1.6);
+          bin.castShadow = true;
+          scene.add(bin);
+          engine.colliders.push({ x: binX, z: centreZ + 1.6, halfX: 0.4, halfZ: 0.4, kind: "landmark" });
+        }
+      }
+      if (district.id === "elite") {
+        for (const flowerX of [district.x - 105, district.x - 25, district.x + 25, district.x + 105]) {
+          box(scene, [5.4, 0.42, 1.3], [flowerX, 0.3, centreZ + 2.9], 0x876f55);
+          for (const offset of [-1.7, 0, 1.7]) {
+            const bloom = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 0), mat(offset === 0 ? 0xe4a3a8 : 0xe8cf6b));
+            bloom.position.set(flowerX + offset, 0.75, centreZ + 2.9);
+            scene.add(bloom);
+          }
+        }
+      }
     }
 
     const riverMat = new THREE.MeshStandardMaterial({
@@ -2562,7 +2889,9 @@ export default function SecurityConsoleGame() {
       for (let i = 0; i < 12; i++) {
         const walkerId = (villageX === 0 ? 100 : 200) + i;
         const walker = makePerson(walkerColors[i % walkerColors.length]);
-        const laneZ = i % 2 === 0 ? -10.5 : 10.5;
+        const pedestrianDistrict = villageX === 0 ? DISTRICTS[0] : DISTRICTS[3];
+        const pedestrianProfile = SIDEWALK_PROFILES[pedestrianDistrict.id];
+        const laneZ = (i % 2 === 0 ? -1 : 1) * sidewalkCenterZ(pedestrianProfile);
         const minX = villageX - 150;
         const maxX = villageX + 150;
         const direction = (i % 3 === 0 ? -1 : 1) as 1 | -1;
@@ -2784,6 +3113,17 @@ export default function SecurityConsoleGame() {
           setMode("transit");
           return;
         }
+        if (!engine.driving && engine.nearestBench) {
+          engine.keys.clear();
+          energyRef.current = clamp(energyRef.current + 12, 0, 100);
+          setEnergy(Math.round(energyRef.current));
+          player.position.x = engine.nearestBench.x;
+          player.position.z = engine.nearestBench.z;
+          player.rotation.y = engine.nearestBench.z > 0 ? Math.PI : 0;
+          benchRestUntilRef.current = performance.now() + 2600;
+          flash("Алексей отдохнул на скамейке · энергия +12");
+          return;
+        }
         if (!engine.driving && currentVehicleRef.current && engine.car?.visible && focus.position.distanceTo(engine.car.position) < 5.2) {
           engine.driving = true;
           engine.yaw = car.rotation.y + Math.PI;
@@ -2960,6 +3300,7 @@ export default function SecurityConsoleGame() {
       const focus = ridingBus ? bus : engine.driving ? car : player;
       let currentMovement: MovementState = "Покой";
       let currentWalkSpeedKmh = 0;
+      let currentWalkSurface: WalkSurfaceKind = pedestrianSurfaceAt(player.position.x, player.position.z).surface;
 
       if (canMove && engine.driving) {
         const activeVehicle = currentVehicleRef.current ? VEHICLE_BY_ID[currentVehicleRef.current] : VEHICLE_BY_ID.oka;
@@ -3094,8 +3435,13 @@ export default function SecurityConsoleGame() {
         const fastWalking = moving && !jogging && now < engine.fastWalkUntil;
         currentMovement = jogging ? "Бег трусцой" : fastWalking ? "Быстрый шаг" : moving ? "Шаг" : "Покой";
         const outfit = OUTFIT_BY_ID[outfitRef.current];
-        const surface = surfaceAt(player.position.x, player.position.z);
-        const surfaceSpeed = surface === "Асфальт" ? 1 : surface === "Грунт" ? 0.95 * outfit.ground : 0.85 * outfit.ground;
+        const pedestrianSurface = pedestrianSurfaceAt(player.position.x, player.position.z);
+        currentWalkSurface = pedestrianSurface.surface;
+        const wetSidewalk = (weatherRef.current === "Дождь" || weatherRef.current === "Гроза") && pedestrianSurface.onSidewalk;
+        if ((weatherRef.current === "Дождь" || weatherRef.current === "Гроза") && currentWalkSurface === "Гравий") {
+          currentWalkSurface = "Грязь";
+        }
+        const surfaceSpeed = pedestrianSurface.speed * (pedestrianSurface.onSidewalk ? 1 : outfit.ground) * (wetSidewalk ? 0.93 : 1);
         const fatigueSpeed = energyRef.current < 20 ? 0.7 : 1;
         const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.35;
         const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed * (usingPhone ? 0.38 : 1);
@@ -3112,8 +3458,13 @@ export default function SecurityConsoleGame() {
           statisticsRef.current.kmWalked += Math.hypot(dx, dz) / 1000;
           player.rotation.y = Math.atan2(dx, dz);
           player.position.y = Math.abs(Math.sin(now * (jogging ? 0.017 : 0.011))) * (jogging ? 0.1 : 0.055);
-          const energyCost = (jogging ? 1.5 : fastWalking ? 0.5 : 0.2) * outfit.energy;
+          const energyCost = (jogging ? 1.5 : fastWalking ? 0.5 : 0.2) * outfit.energy * pedestrianSurface.energy;
           energyRef.current = clamp(energyRef.current - dt * energyCost, 0, 100);
+          const stepInterval = jogging ? 300 : fastWalking ? 390 : 510;
+          if (now - lastFootstepAtRef.current >= stepInterval) {
+            lastFootstepAtRef.current = now;
+            playFootstep(currentWalkSurface);
+          }
         } else {
           player.position.y = THREE.MathUtils.lerp(player.position.y, 0, dt * 10);
           energyRef.current = clamp(energyRef.current + dt * 5, 0, 100);
@@ -3121,6 +3472,13 @@ export default function SecurityConsoleGame() {
       }
       if (!engine.driving) {
         animateHero(player, currentMovement, now, energyRef.current < 20, modeRef.current === "tablet");
+        if (now < benchRestUntilRef.current && currentMovement === "Покой") {
+          player.position.y = 0.5;
+          const leftLeg = player.getObjectByName("leftLeg");
+          const rightLeg = player.getObjectByName("rightLeg");
+          if (leftLeg) leftLeg.rotation.x = -1.15;
+          if (rightLeg) rightLeg.rotation.x = -1.15;
+        }
       }
 
       for (const puff of dustPuffs) {
@@ -3225,14 +3583,19 @@ export default function SecurityConsoleGame() {
         personWalkCycle(walker.mesh, true, now, i * 0.7);
       });
       engine.traffic.forEach((trafficVehicle) => {
-        trafficVehicle.mesh.position.x += trafficVehicle.direction * trafficVehicle.speed * dt;
+        const yieldingAtCrossing =
+          !engine.driving &&
+          isPedestrianCrossing(player.position.x, player.position.z) &&
+          Math.abs(trafficVehicle.mesh.position.x - player.position.x) < 24;
+        const trafficSpeed = trafficVehicle.speed * (yieldingAtCrossing ? 0.12 : 1);
+        trafficVehicle.mesh.position.x += trafficVehicle.direction * trafficSpeed * dt;
         if (trafficVehicle.mesh.position.x > trafficVehicle.maxX) trafficVehicle.mesh.position.x = trafficVehicle.minX;
         if (trafficVehicle.mesh.position.x < trafficVehicle.minX) trafficVehicle.mesh.position.x = trafficVehicle.maxX;
         trafficVehicle.mesh.position.z = trafficVehicle.laneZ;
         trafficVehicle.mesh.rotation.y = trafficVehicle.direction > 0 ? Math.PI / 2 : -Math.PI / 2;
         trafficVehicle.mesh.traverse((part) => {
           if (part instanceof THREE.Mesh && (part.name === "frontWheel" || part.name === "rearWheel")) {
-            part.rotation.x += trafficVehicle.direction * trafficVehicle.speed * dt / 0.58;
+            part.rotation.x += trafficVehicle.direction * trafficSpeed * dt / 0.58;
           }
         });
       });
@@ -3347,9 +3710,15 @@ export default function SecurityConsoleGame() {
           }
         }
         engine.nearestWalker = closestWalker;
+        engine.nearestBench =
+          engine.benches
+            .map((bench) => ({ bench, distance: Math.hypot(bench.x - player.position.x, bench.z - player.position.z) }))
+            .filter((item) => item.distance < 3.4)
+            .sort((a, b) => a.distance - b.distance)[0]?.bench ?? null;
       } else {
         engine.nearest = null;
         engine.nearestWalker = null;
+        engine.nearestBench = null;
       }
 
       const target = focus.position.clone();
@@ -3371,11 +3740,21 @@ export default function SecurityConsoleGame() {
         setGameTime(engine.time);
         setNearest(engine.nearest);
         setNearestWalker(engine.nearestWalker);
+        setNearBench(Boolean(engine.nearestBench));
         setNearCar(Boolean(currentVehicleRef.current) && car.visible && !engine.driving && player.position.distanceTo(car.position) < 5.2);
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
         setCarPos({ x: car.position.x, z: car.position.z });
         setMovementState(currentMovement);
         setPlayerSpeedKmh(Math.round(currentWalkSpeedKmh * 10) / 10);
+        setWalkSurface(currentWalkSurface);
+        const activeAudio = audioEngineRef.current;
+        if (activeAudio) {
+          const night = engine.time >= 21 || engine.time < 6;
+          const storm = weatherRef.current === "Гроза";
+          const rain = weatherRef.current === "Дождь" || storm;
+          activeAudio.wind.frequency.setTargetAtTime(storm ? 72 : night ? 39 : 48, activeAudio.context.currentTime, 0.8);
+          activeAudio.windLevel.gain.setTargetAtTime(rain ? 0.025 : night ? 0.008 : 0.012, activeAudio.context.currentTime, 0.8);
+        }
         setCarTelemetry({
           speed: Math.round(Math.abs(engine.carSpeed) * 3.6),
           fuel: Math.round(engine.fuel * 100) / 100,
@@ -4318,6 +4697,16 @@ export default function SecurityConsoleGame() {
     flash("Заметка сохранена и синхронизирована с планшетом");
   };
 
+  const updateAudioChannel = (channel: keyof AudioMix, value: number) => {
+    const next = {
+      ...audioMixRef.current,
+      [channel]: channel === "alerts" ? clamp(value, 30, 100) : clamp(value, 0, 100),
+    };
+    audioMixRef.current = next;
+    setAudioMix(next);
+    ensureAudio();
+  };
+
   const startNetworkGame = () => {
     if (!networkIsHost) return;
     sendNetworkMessage({ type: "start" });
@@ -4434,6 +4823,7 @@ export default function SecurityConsoleGame() {
               : "weather-clear"
       }`}
       style={{ "--game-ui-scale": uiScale } as CSSProperties}
+      onPointerDownCapture={() => ensureAudio()}
       aria-label="Игра Пульт охраны"
     >
       <div className="world-viewport" ref={mountRef} aria-label="Трёхмерный посёлок" />
@@ -4462,7 +4852,7 @@ export default function SecurityConsoleGame() {
           <div className="energy-card">
             <div className="energy-label"><span>Энергия менеджера</span><b>{energy}%</b></div>
             <div className="energy-track"><div className="energy-fill" style={{ width: `${energy}%` }} /></div>
-            <small>{driving ? "За рулём" : `${movementState}${playerSpeedKmh > 0 ? ` · ${playerSpeedKmh.toFixed(1)} км/ч` : ""}`}{energy < 20 ? " · усталость" : ""}</small>
+            <small>{driving ? "За рулём" : `${movementState}${playerSpeedKmh > 0 ? ` · ${playerSpeedKmh.toFixed(1)} км/ч` : ""} · ${walkSurface}`}{energy < 20 ? " · усталость" : ""}</small>
           </div>
           {driving && (
             <div className="vehicle-card">
@@ -4557,13 +4947,19 @@ export default function SecurityConsoleGame() {
               <span>{busEtaMinutes < 0 ? "Автобусы с 06:00" : busReadyAtStop ? "Сесть в автобус" : `Автобус примерно через ${busEtaMinutes} мин`}</span>
             </div>
           )}
-          {mode === "world" && !nearStationId && !nearBusStopId && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
+          {mode === "world" && !nearStationId && !nearBusStopId && !driving && nearBench && (
+            <div className="interaction-prompt">
+              <span className="key">E</span>
+              <span>Сесть на скамейку · восстановить энергию</span>
+            </div>
+          )}
+          {mode === "world" && !nearStationId && !nearBusStopId && !nearBench && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>{driving ? "Выйти из машины" : nearest ? `Обсудить договор · ${nearest.name}` : `Поговорить на улице · ${nearestWalker?.name}`}</span>
             </div>
           )}
-          {mode === "world" && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearStationId && !nearBusStopId && (
+          {mode === "world" && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearBench && !nearStationId && !nearBusStopId && (
             <div className="interaction-prompt"><span className="key">E</span><span>Сесть в {VEHICLE_BY_ID[currentVehicle].name.toLowerCase()}</span></div>
           )}
         </div>
@@ -4650,8 +5046,8 @@ export default function SecurityConsoleGame() {
               {phoneApp === "radio" && (
                 <div className="phone-page phone-radio">
                   <div className={`radio-cover ${radioPlaying ? "playing" : ""}`}><i>♫</i><b>{radioStation}</b><span>{radioPlaying ? "В эфире" : "Пауза"}</span></div>
-                  {["Ретро FM", "Дорожное радио", "Lo‑Fi Beats"].map((station) => <button className={radioStation === station ? "active" : ""} key={station} onClick={() => { setRadioStation(station); setRadioPlaying(true); }}><b>{station}</b><span>{station === "Lo‑Fi Beats" ? "Спокойная музыка для обходов" : "Музыка и новости дороги"}</span></button>)}
-                  <button className="radio-toggle" onClick={() => setRadioPlaying((value) => !value)}>{radioPlaying ? "Поставить на паузу" : "Продолжить воспроизведение"}</button>
+                  {["Ретро FM", "Дорожное радио", "Вести посёлка", "Пультовая волна", "Lo‑Fi Beats"].map((station) => <button className={radioStation === station ? "active" : ""} key={station} onClick={() => { ensureAudio(); setRadioStation(station); setRadioPlaying(true); }}><b>{station}</b><span>{station === "Lo‑Fi Beats" ? "Оригинальный спокойный синтезированный фон" : station === "Вести посёлка" ? `Новости: ${locationName}, ${weather.toLowerCase()}` : station === "Пультовая волна" ? "Переговоры диспетчера и экипажей" : "Оригинальная музыкальная программа дороги"}</span></button>)}
+                  <button className="radio-toggle" onClick={() => { ensureAudio(); setRadioPlaying((value) => !value); }}>{radioPlaying ? "Поставить на паузу" : "Продолжить воспроизведение"}</button>
                 </div>
               )}
               {phoneApp === "notes" && (
@@ -4667,8 +5063,20 @@ export default function SecurityConsoleGame() {
                   <label>Обои<select value={phoneWallpaper} onChange={(event) => { const value = event.target.value as PhoneWallpaper; phoneWallpaperRef.current = value; setPhoneWallpaper(value); window.setTimeout(() => persistRef.current(), 0); }}><option value="village">Посёлок</option><option value="night">Ночная трасса</option><option value="forest">Лес</option></select></label>
                   <label>Громкость звонка <b>{phoneVolume}%</b><input type="range" min="0" max="100" value={phoneVolume} onChange={(event) => { const value = Number(event.target.value); phoneVolumeRef.current = value; setPhoneVolume(value); }} onPointerUp={() => persistRef.current()} /></label>
                   <label>Размер интерфейса <b>{uiScale.toFixed(1)}×</b><input type="range" min="0.8" max="1.5" step="0.1" value={uiScale} onChange={(event) => { const value = Number(event.target.value); uiScaleRef.current = value; setUiScale(value); }} onPointerUp={() => persistRef.current()} /></label>
+                  <div className="audio-settings-title"><b>Звук и музыка</b><span>Процедурный звук включается после первого нажатия в игре</span></div>
+                  {([
+                    ["master", "Общая громкость"],
+                    ["music", "Музыка"],
+                    ["radio", "Радио"],
+                    ["ambient", "Окружение"],
+                    ["sfx", "Эффекты и шаги"],
+                    ["alerts", "Тревоги и пульт"],
+                    ["voice", "Голос"],
+                  ] as [keyof AudioMix, string][]).map(([channel, label]) => (
+                    <label key={channel}>{label} <b>{audioMix[channel]}%</b><input type="range" min={channel === "alerts" ? 30 : 0} max="100" step="5" value={audioMix[channel]} onChange={(event) => updateAudioChannel(channel, Number(event.target.value))} onPointerUp={() => persistRef.current()} /></label>
+                  ))}
                   <button onClick={() => { uiScaleRef.current = 1; setUiScale(1); persistRef.current(); }}>Сбросить масштаб до 1.0×</button>
-                  <small>Масштаб применяется к HUD, окнам, планшету и смартфону и сохраняется локально.</small>
+                  <small>Масштаб и отдельные каналы громкости сохраняются локально. Тревоги нельзя сделать тише 30%.</small>
                 </div>
               )}
             </div>

@@ -299,3 +299,25 @@ test("stops street NPCs for dialogue and provides physical bus rides", async () 
   assert.doesNotMatch(source, /const rideBusTo/);
   assert.match(styles, /\.bus-ride-panel/);
 });
+
+test("adds district sidewalks, crossings, rest benches, and procedural audio", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /type WalkSurfaceKind = "Плитка"/);
+  assert.match(source, /const SIDEWALK_PROFILES/);
+  assert.match(source, /central: \{ surface: "Плитка", width: 3/);
+  assert.match(source, /elite: \{ surface: "Декоративная плитка", width: 4, speed: 1\.05/);
+  assert.match(source, /function pedestrianSurfaceAt/);
+  assert.match(source, /surface: "Проезжая часть", speed: 0\.8, energy: 1\.2/);
+  assert.match(source, /const addStreetBench/);
+  assert.match(source, /isPedestrianCrossing\(player\.position\.x, player\.position\.z\)/);
+  assert.match(source, /trafficVehicle\.speed \* \(yieldingAtCrossing \? 0\.12 : 1\)/);
+  assert.match(source, /const playFootstep = useCallback/);
+  assert.match(source, /new AudioContext\(\)/);
+  assert.match(source, /Тревоги нельзя сделать тише 30%/);
+  assert.match(source, /"Вести посёлка", "Пультовая волна"/);
+  assert.match(styles, /\.audio-settings-title/);
+});
