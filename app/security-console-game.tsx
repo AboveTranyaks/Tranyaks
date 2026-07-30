@@ -554,6 +554,9 @@ const laneZForDirection = (direction: 1 | -1, offset: number) =>
     : direction > 0
       ? offset
       : -offset;
+// The main road is viewed along its X axis: the screen-right lane is +Z.
+// Civilian cars therefore move forward (+X) on +Z and toward the player on -Z.
+const civilianTrafficDirectionForLane = (laneZ: number): 1 | -1 => (laneZ > 0 ? 1 : -1);
 
 const GAS_STATIONS = [
   { id: "pervorechenskoe", name: "АЗС «Первореченская»", x: 250, z: -34 },
@@ -2473,10 +2476,11 @@ export default function SecurityConsoleGame() {
 
     const trafficColors = [0x587e91, 0xd39a4b, 0x6f8c68, 0x8b6688, 0xc65d4d, 0xd4d0bd];
     for (let i = 0; i < 14; i++) {
-      const direction = (i % 2 === 0 ? 1 : -1) as 1 | -1;
+      const laneZ = i % 2 === 0 ? -3.2 : 3.2;
+      const direction = civilianTrafficDirectionForLane(laneZ);
       const trafficCar = makeCar(trafficColors[i % trafficColors.length], true);
       trafficCar.scale.setScalar(0.82 + (i % 3) * 0.05);
-      trafficCar.position.set(-130 + ((i * 317) % 4260), 0, laneZForDirection(direction, 3.2));
+      trafficCar.position.set(-130 + ((i * 317) % 4260), 0, laneZ);
       trafficCar.rotation.y = direction > 0 ? Math.PI / 2 : -Math.PI / 2;
       trafficCar.traverse((part) => {
         if (part instanceof THREE.Mesh && part.name === "headlight" && part.material instanceof THREE.MeshStandardMaterial) {
@@ -2488,7 +2492,7 @@ export default function SecurityConsoleGame() {
         mesh: trafficCar,
         direction,
         speed: 6.5 + (i % 5) * 0.65,
-        laneZ: laneZForDirection(direction, 3.2),
+        laneZ,
         minX: -170,
         maxX: 4170,
       });
@@ -2843,7 +2847,7 @@ export default function SecurityConsoleGame() {
           }
           const travelDirectionX = carDirection.x * Math.sign(engine.carSpeed || 1);
           const onMainRoad = Math.abs(car.position.z) < 8;
-          const wrongRightHandLane = onMainRoad && ((travelDirectionX > 0.25 && car.position.z > 0.7) || (travelDirectionX < -0.25 && car.position.z < -0.7));
+          const wrongRightHandLane = onMainRoad && ((travelDirectionX > 0.25 && car.position.z < -0.7) || (travelDirectionX < -0.25 && car.position.z > 0.7));
           wrongLaneSeconds = wrongRightHandLane && speedKmh > 8 ? wrongLaneSeconds + dt : Math.max(0, wrongLaneSeconds - dt * 2);
           if (wrongLaneSeconds >= 4 && now >= nextViolationCheck) {
             wrongLaneSeconds = 0;
