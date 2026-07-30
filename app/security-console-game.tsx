@@ -16,6 +16,7 @@ type PrivacyMode = "all" | "summary" | "hidden";
 type AvatarId = "avatar_01" | "avatar_02" | "avatar_03" | "avatar_04";
 type DistrictId = "central" | "residential" | "industrial" | "elite";
 type VehicleId = "old_sedan" | "oka" | "granta" | "camry" | "largus" | "niva" | "pickup" | "gazelle" | "supra" | "enduro";
+type DrivingSide = "right" | "left";
 
 type StaffState = {
   dispatchers: number;
@@ -542,6 +543,17 @@ const BUS_STOPS: BusStopSpec[] = [
   { id: "highway", name: "Трасса · промежуточная", x: 2000, z: -18 },
   { id: "dinskaya", name: "ст. Динская", x: 3875, z: -18 },
 ];
+
+const DRIVING_SIDE: DrivingSide = "right";
+const BUS_STOP_DWELL_GAME_MINUTES = 5;
+const laneZForDirection = (direction: 1 | -1, offset: number) =>
+  DRIVING_SIDE === "right"
+    ? direction > 0
+      ? -offset
+      : offset
+    : direction > 0
+      ? offset
+      : -offset;
 
 const GAS_STATIONS = [
   { id: "pervorechenskoe", name: "АЗС «Первореченская»", x: 250, z: -34 },
@@ -1244,7 +1256,9 @@ function makeCar(bodyColor = 0xc85f4c, withDriver = false) {
     const hair = new THREE.Mesh(new THREE.SphereGeometry(0.34, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x4d372d));
     hair.position.y = 2.55;
     hair.scale.y = 0.45;
-    driver.position.set(-0.68, 0, 0.38);
+    // Left-hand steering wheel for right-hand traffic. The driver is seated
+    // below the roofline so the head stays inside the transparent cabin.
+    driver.position.set(-0.68, -0.62, 0.38);
     driver.add(torso, head, hair);
     visual.add(driver);
   }
@@ -1339,10 +1353,12 @@ function makeBus() {
   const route = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.72), new THREE.MeshBasicMaterial({ map: makeTextBoard("ДИНСКАЯ — ПЕРВОРЕЧЕНСКОЕ"), side: THREE.DoubleSide }));
   route.position.set(0, 2.62, 4.62);
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.25, 2.15, 0.12), mat(0x426b68));
+  // Local +X is the right side of the bus when it travels forward (+Z).
   door.position.set(1.15, 1.48, 4.66);
   door.name = "busDoor";
   const driver = makePerson(0x4e6f5d);
   driver.scale.setScalar(0.42);
+  // Driver and steering wheel are on the left for Russian right-hand traffic.
   driver.position.set(-0.85, 0.6, 2.8);
   driver.name = "busDriver";
   group.add(body, roof, route, door, driver);
@@ -1875,6 +1891,7 @@ export default function SecurityConsoleGame() {
           reputation,
           weather: weatherRef.current,
           gameTime: engineRef.current.time,
+          drivingSide: DRIVING_SIDE,
         });
       }
       if (message.type === "world" && !networkIsHost) {
@@ -1926,7 +1943,7 @@ export default function SecurityConsoleGame() {
       upsertPlayer(player);
       channel.postMessage({ type: "state", senderId: profileRef.current.id, player });
       syncTicks += 1;
-      if (networkIsHost && syncTicks % 120 === 0) channel.postMessage({ type: "world-sync", senderId: profileRef.current.id, gameTime: engineRef.current.time, weather: weatherRef.current });
+      if (networkIsHost && syncTicks % 120 === 0) channel.postMessage({ type: "world-sync", senderId: profileRef.current.id, gameTime: engineRef.current.time, weather: weatherRef.current, drivingSide: DRIVING_SIDE });
     }, 250);
     return () => {
       channel.postMessage({ type: "leave", senderId: profileRef.current.id });
@@ -2459,7 +2476,7 @@ export default function SecurityConsoleGame() {
       const direction = (i % 2 === 0 ? 1 : -1) as 1 | -1;
       const trafficCar = makeCar(trafficColors[i % trafficColors.length], true);
       trafficCar.scale.setScalar(0.82 + (i % 3) * 0.05);
-      trafficCar.position.set(-130 + ((i * 317) % 4260), 0, direction > 0 ? -3.2 : 3.2);
+      trafficCar.position.set(-130 + ((i * 317) % 4260), 0, laneZForDirection(direction, 3.2));
       trafficCar.rotation.y = direction > 0 ? Math.PI / 2 : -Math.PI / 2;
       trafficCar.traverse((part) => {
         if (part instanceof THREE.Mesh && part.name === "headlight" && part.material instanceof THREE.MeshStandardMaterial) {
@@ -2471,21 +2488,22 @@ export default function SecurityConsoleGame() {
         mesh: trafficCar,
         direction,
         speed: 6.5 + (i % 5) * 0.65,
-        laneZ: direction > 0 ? -3.2 : 3.2,
+        laneZ: laneZForDirection(direction, 3.2),
         minX: -170,
         maxX: 4170,
       });
     }
 
     const bus = makeBus();
-    bus.position.set(BUS_STOPS[0].x, 0, -3.8);
+    bus.position.set(BUS_STOPS[0].x, 0, laneZForDirection(1, 3.8));
     bus.rotation.y = Math.PI / 2;
     scene.add(bus);
     engine.bus = bus;
     let busDirection: 1 | -1 = 1;
     let busCurrentStop = 0;
     let busNextStop = 1;
-    let busDwellSeconds = 10;
+    let busDwellGameHours = BUS_STOP_DWELL_GAME_MINUTES / 60;
+    let lastBusGameTime = engine.time;
     let busServiceKey = "";
 
     const passengerColors = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
@@ -2494,7 +2512,7 @@ export default function SecurityConsoleGame() {
       directions.forEach((direction, passengerIndex) => {
         const passenger = makePerson(passengerColors[(stopIndex * 4 + passengerIndex) % passengerColors.length]);
         passenger.scale.setScalar(0.54);
-        const waitingZ = direction > 0 ? -15.4 : 15.4;
+        const waitingZ = laneZForDirection(direction, 15.4);
         passenger.position.set(stop.x - 2.1 + passengerIndex * 1.35, 0, waitingZ);
         passenger.rotation.y = direction > 0 ? 0 : Math.PI;
         passenger.name = `busPassenger-${stop.id}-${passengerIndex}`;
@@ -3020,10 +3038,12 @@ export default function SecurityConsoleGame() {
         });
       });
       const busOperating = engine.time >= 6 && engine.time < 23;
+      const busGameTimeDelta = (engine.time - lastBusGameTime + 24) % 24;
+      lastBusGameTime = engine.time;
       bus.visible = busOperating;
       if (busOperating) {
-        if (busDwellSeconds > 0) {
-          busDwellSeconds = Math.max(0, busDwellSeconds - dt);
+        if (busDwellGameHours > 0) {
+          busDwellGameHours = Math.max(0, busDwellGameHours - busGameTimeDelta);
           const serviceKey = `${busCurrentStop}:${busDirection}`;
           if (serviceKey !== busServiceKey) {
             busServiceKey = serviceKey;
@@ -3032,14 +3052,14 @@ export default function SecurityConsoleGame() {
                 passenger.state = "exiting";
                 passenger.progress = 0;
                 passenger.mesh.visible = true;
-                passenger.start.set(bus.position.x + (busDirection > 0 ? 2.5 : -2.5), 0, bus.position.z + (busDirection > 0 ? -1.6 : 1.6));
-                passenger.end.set(BUS_STOPS[busCurrentStop].x - 2 + (passengerIndex % 4) * 1.25, 0, busDirection > 0 ? -15.4 : 15.4);
+                passenger.start.set(bus.position.x + (busDirection > 0 ? 2.5 : -2.5), 0, bus.position.z + laneZForDirection(busDirection, 1.6));
+                passenger.end.set(BUS_STOPS[busCurrentStop].x - 2 + (passengerIndex % 4) * 1.25, 0, laneZForDirection(busDirection, 15.4));
                 passenger.mesh.position.copy(passenger.start);
               } else if (passenger.state === "waiting" && passenger.stopIndex === busCurrentStop && passenger.direction === busDirection) {
                 passenger.state = "boarding";
                 passenger.progress = 0;
                 passenger.start.copy(passenger.mesh.position);
-                passenger.end.set(bus.position.x + (busDirection > 0 ? 2.5 : -2.5), 0, bus.position.z + (busDirection > 0 ? -1.6 : 1.6));
+                passenger.end.set(bus.position.x + (busDirection > 0 ? 2.5 : -2.5), 0, bus.position.z + laneZForDirection(busDirection, 1.6));
                 const remainingStops = busDirection > 0 ? BUS_STOPS.length - 1 - busCurrentStop : busCurrentStop;
                 const rideCount = Math.max(1, Math.min(remainingStops, 1 + (passengerIndex % 2)));
                 passenger.targetStop = busCurrentStop + busDirection * rideCount;
@@ -3053,7 +3073,7 @@ export default function SecurityConsoleGame() {
           if (Math.abs(remaining) <= busSpeed * dt) {
             bus.position.x = targetX;
             busCurrentStop = busNextStop;
-            busDwellSeconds = 10;
+            busDwellGameHours = BUS_STOP_DWELL_GAME_MINUTES / 60;
             if (busCurrentStop === BUS_STOPS.length - 1) busDirection = -1;
             if (busCurrentStop === 0) busDirection = 1;
             busNextStop = busCurrentStop + busDirection;
@@ -3062,10 +3082,10 @@ export default function SecurityConsoleGame() {
             busServiceKey = "";
           }
         }
-        bus.position.z = busDirection > 0 ? -3.8 : 3.8;
+        bus.position.z = laneZForDirection(busDirection, 3.8);
         bus.rotation.y = busDirection > 0 ? Math.PI / 2 : -Math.PI / 2;
         const busDoor = bus.getObjectByName("busDoor");
-        if (busDoor) busDoor.position.x = THREE.MathUtils.lerp(busDoor.position.x, busDwellSeconds > 0 ? 1.72 : 1.15, 0.08);
+        if (busDoor) busDoor.position.x = THREE.MathUtils.lerp(busDoor.position.x, busDwellGameHours > 0 ? 1.72 : 1.15, 0.08);
         bus.traverse((part) => {
           if (part instanceof THREE.Mesh && part.name === "busWheel") {
             part.rotation.x += busDirection * 16.67 * dt / 0.68;
@@ -3086,7 +3106,7 @@ export default function SecurityConsoleGame() {
             passenger.state = "waiting";
             passenger.stopIndex = passenger.targetStop;
             passenger.direction = passenger.stopIndex === 0 ? 1 : passenger.stopIndex === BUS_STOPS.length - 1 ? -1 : (busDirection === 1 ? -1 : 1);
-            passenger.mesh.position.z = passenger.direction > 0 ? -15.4 : 15.4;
+            passenger.mesh.position.z = laneZForDirection(passenger.direction, 15.4);
             passenger.mesh.visible = true;
           }
         }
@@ -3153,7 +3173,7 @@ export default function SecurityConsoleGame() {
         );
         setNearStationId(Math.hypot(focus.position.x - nearbyStation.x, focus.position.z - nearbyStation.z) < 28 ? nearbyStation.id : null);
         setBusPos({ x: bus.position.x, z: bus.position.z });
-        setBusReadyAtStop(busOperating && busDwellSeconds > 0 && Math.abs(bus.position.x - nearbyStop.x) < 20);
+        setBusReadyAtStop(busOperating && busDwellGameHours > 0 && Math.abs(bus.position.x - nearbyStop.x) < 20);
         setBusEtaMinutes(
           busOperating
             ? Math.max(0, Math.ceil(Math.abs(bus.position.x - nearbyStop.x) / 16.67 / 60))
@@ -4210,7 +4230,7 @@ export default function SecurityConsoleGame() {
             </header>
             <div className={`bus-arrival ${busReadyAtStop ? "ready" : ""}`}>
               <b>{busEtaMinutes < 0 ? "Движение автобусов завершено" : busReadyAtStop ? "Автобус на остановке · двери открыты" : `Ближайший автобус примерно через ${busEtaMinutes} мин`}</b>
-              <span>Оплата при посадке: 50 ₽ до промежуточной остановки, 150 ₽ между населёнными пунктами.</span>
+              <span>Стоянка длится 5 игровых минут. Оплата: 50 ₽ до промежуточной остановки, 150 ₽ между населёнными пунктами.</span>
             </div>
             <div className="bus-route-list">
               {BUS_STOPS.map((stop, index) => (
@@ -4219,7 +4239,7 @@ export default function SecurityConsoleGame() {
                 </button>
               ))}
             </div>
-            <footer><span>Автобус движется по правой полосе со скоростью около 60 км/ч.</span><button onClick={() => { setTransitMenu(null); setMode("world"); }}>Не ехать</button></footer>
+            <footer><span>Правостороннее движение · двери открываются со стороны тротуара.</span><button onClick={() => { setTransitMenu(null); setMode("world"); }}>Не ехать</button></footer>
           </div>
         </section>
       )}

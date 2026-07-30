@@ -142,8 +142,9 @@ test("contains right-hand bus service, intermediate stop, greener vegetation, an
   assert.match(source, /АЗС «Динская»/);
   assert.match(source, /function makeBus\(\)/);
   assert.match(source, /busSpeed = 16\.67/);
-  assert.match(source, /bus\.position\.z = busDirection > 0 \? -3\.8 : 3\.8/);
-  assert.match(source, /trafficCar\.position\.set\([^;]+direction > 0 \? -3\.2 : 3\.2\)/);
+  assert.match(source, /const DRIVING_SIDE: DrivingSide = "right"/);
+  assert.match(source, /laneZForDirection\(busDirection, 3\.8\)/);
+  assert.match(source, /laneZForDirection\(direction, 3\.2\)/);
   assert.match(source, /group\.scale\.setScalar\(0\.6\)/);
   assert.match(source, /new THREE\.InstancedMesh\(grassGeometry, mat\(0x4f9f43\), 3000\)/);
   assert.doesNotMatch(source, /for \(let x = -88; x <= 88; x \+= 22\)/);
@@ -184,6 +185,18 @@ test("applies right-hand traffic rules, collision damage, and fines", async () =
   assert.match(source, /Опасное ДТП с пешеходом/);
   assert.match(source, /damageSpeedFactor/);
   assert.match(styles, /\.traffic-incident/);
+});
+
+test("keeps drivers below the roof and dwells for five game minutes", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /const BUS_STOP_DWELL_GAME_MINUTES = 5/);
+  assert.match(source, /busDwellGameHours = BUS_STOP_DWELL_GAME_MINUTES \/ 60/);
+  assert.match(source, /Стоянка длится 5 игровых минут/);
+  assert.match(source, /driver\.position\.set\(-0\.68, -0\.62, 0\.38\)/);
+  assert.match(source, /Left-hand steering wheel for right-hand traffic/);
+  assert.match(source, /door\.position\.set\(1\.15, 1\.48, 4\.66\)/);
+  assert.match(source, /drivingSide: DRIVING_SIDE/);
 });
 
 test("contains rotating daily challenges and cooperative room systems", async () => {
