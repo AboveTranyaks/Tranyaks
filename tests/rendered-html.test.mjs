@@ -242,3 +242,40 @@ test("keeps pause controls readable and daily rewards accessible", async () => {
   assert.match(styles, /\.tablet-content[\s\S]*min-height:\s*0/);
   assert.match(styles, /\.streak-roadmap > p/);
 });
+
+test("adds a persistent smartphone, street conversations, and scalable interface", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /type PhoneApp = "home" \| "taxi" \| "contacts"/);
+  assert.match(source, /e\.code === "KeyO"/);
+  assert.match(source, /gamepad\?\.buttons\[12\]\?\.pressed/);
+  assert.match(source, /modeRef\.current === "world" \|\| modeRef\.current === "phone"/);
+  assert.match(source, /requestTaxi/);
+  assert.match(source, /contactResidentByPhone/);
+  assert.match(source, /capturePhonePhoto/);
+  assert.match(source, /phoneNotes: phoneNotesRef\.current/);
+  assert.match(source, /uiScale: uiScaleRef\.current/);
+  assert.match(source, /handleStreetReply/);
+  assert.match(source, /personalReputation/);
+  assert.match(source, /рекомендует вас/);
+  assert.match(styles, /\.phone-layer/);
+  assert.match(styles, /\.phone-app-grid/);
+  assert.match(styles, /\.street-dialogue-card/);
+  assert.match(styles, /zoom: var\(--game-ui-scale, 1\)/);
+});
+
+test("adds pole collisions and high-contrast alarm controls", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /engine\.colliders\.push\(\{ x, z: 15, halfX: 0\.42, halfZ: 0\.42, kind: "landmark" \}\)/);
+  assert.match(source, /z: z - 3\.5, halfX: 0\.34, halfZ: 0\.34/);
+  assert.match(styles, /\.alarm-card \.alarm-countdown \{ color: #8f431f/);
+  assert.match(styles, /\.alarm-card \.alarm-action\.danger \{ color: #9f3024/);
+  assert.match(styles, /background: #fff8f5/);
+});

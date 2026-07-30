@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "network" | "world" | "dialogue" | "tablet" | "map" | "pause" | "tariff" | "office" | "station" | "transit";
+type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "pause" | "tariff" | "office" | "station" | "transit";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
@@ -17,6 +17,9 @@ type AvatarId = "avatar_01" | "avatar_02" | "avatar_03" | "avatar_04";
 type DistrictId = "central" | "residential" | "industrial" | "elite";
 type VehicleId = "old_sedan" | "oka" | "granta" | "camry" | "largus" | "niva" | "pickup" | "gazelle" | "supra" | "enduro";
 type DrivingSide = "right" | "left";
+type PhoneApp = "home" | "taxi" | "contacts" | "notifications" | "camera" | "radio" | "notes" | "settings";
+type PhoneTheme = "dark" | "light";
+type PhoneWallpaper = "village" | "night" | "forest";
 
 type StaffState = {
   dispatchers: number;
@@ -162,6 +165,13 @@ type SaveData = {
   vehicleSiren?: boolean;
   carClean?: boolean;
   seasonalTires?: boolean;
+  streetReputation?: Record<number, number>;
+  contactedResidents?: number[];
+  phoneNotes?: string[];
+  phoneTheme?: PhoneTheme;
+  phoneWallpaper?: PhoneWallpaper;
+  phoneVolume?: number;
+  uiScale?: number;
 };
 
 type SaveEnvelope = {
@@ -184,12 +194,15 @@ type WorldCollider = {
 };
 
 type Walker = {
+  id: number;
+  name: string;
   mesh: THREE.Group;
   minX: number;
   maxX: number;
   laneZ: number;
   direction: 1 | -1;
   speed: number;
+  personalReputation: number;
 };
 
 type TrafficVehicle = {
@@ -707,6 +720,13 @@ const DEFAULT_SAVE: SaveData = {
   vehicleSiren: false,
   carClean: false,
   seasonalTires: false,
+  streetReputation: {},
+  contactedResidents: [],
+  phoneNotes: [],
+  phoneTheme: "dark",
+  phoneWallpaper: "village",
+  phoneVolume: 70,
+  uiScale: 1,
 };
 
 function checksum(data: SaveData) {
@@ -749,6 +769,13 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
     vehicleSiren: value?.vehicleSiren ?? false,
     carClean: value?.carClean ?? false,
     seasonalTires: value?.seasonalTires ?? false,
+    streetReputation: value?.streetReputation ?? {},
+    contactedResidents: Array.isArray(value?.contactedResidents) ? value.contactedResidents : [],
+    phoneNotes: Array.isArray(value?.phoneNotes) ? value.phoneNotes.slice(0, 30) : [],
+    phoneTheme: value?.phoneTheme === "light" ? "light" : "dark",
+    phoneWallpaper: value?.phoneWallpaper === "night" || value?.phoneWallpaper === "forest" ? value.phoneWallpaper : "village",
+    phoneVolume: clamp(value?.phoneVolume ?? 70, 0, 100),
+    uiScale: clamp(value?.uiScale ?? 1, 0.8, 1.5),
     carFuel: value?.carFuel === undefined ? (ownedVehicles.length > 0 ? 20 : 0) : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
 }
@@ -1454,6 +1481,7 @@ export default function SecurityConsoleGame() {
     busPassengers: BusPassenger[];
     remoteMeshes: Map<string, THREE.Group>;
     nearest: Resident | null;
+    nearestWalker: Walker | null;
     time: number;
     yaw: number;
     pitch: number;
@@ -1478,6 +1506,7 @@ export default function SecurityConsoleGame() {
     busPassengers: [],
     remoteMeshes: new Map(),
     nearest: null,
+    nearestWalker: null,
     time: 8.25,
     yaw: Math.PI,
     pitch: 0.52,
@@ -1503,6 +1532,7 @@ export default function SecurityConsoleGame() {
   const [driving, setDriving] = useState(false);
   const [nearCar, setNearCar] = useState(false);
   const [nearest, setNearest] = useState<Resident | null>(null);
+  const [nearestWalker, setNearestWalker] = useState<Walker | null>(null);
   const [nearStationId, setNearStationId] = useState<string | null>(null);
   const [nearBusStopId, setNearBusStopId] = useState<BusStopSpec["id"] | null>(null);
   const [stationMenu, setStationMenu] = useState<(typeof GAS_STATIONS)[number]["id"] | null>(null);
@@ -1610,6 +1640,30 @@ export default function SecurityConsoleGame() {
   const [minimapRotates, setMinimapRotates] = useState(true);
   const [selectedMapObject, setSelectedMapObject] = useState<string | null>(null);
   const [mapWaypoint, setMapWaypoint] = useState<{ x: number; z: number; label: string } | null>(null);
+  const [phoneApp, setPhoneApp] = useState<PhoneApp>("home");
+  const [phoneTheme, setPhoneTheme] = useState<PhoneTheme>(initialSave.phoneTheme ?? "dark");
+  const phoneThemeRef = useRef(phoneTheme);
+  const [phoneWallpaper, setPhoneWallpaper] = useState<PhoneWallpaper>(initialSave.phoneWallpaper ?? "village");
+  const phoneWallpaperRef = useRef(phoneWallpaper);
+  const [phoneVolume, setPhoneVolume] = useState(initialSave.phoneVolume ?? 70);
+  const phoneVolumeRef = useRef(phoneVolume);
+  const [phoneNotes, setPhoneNotes] = useState<string[]>(initialSave.phoneNotes ?? []);
+  const phoneNotesRef = useRef(phoneNotes);
+  const [phoneNoteDraft, setPhoneNoteDraft] = useState("");
+  const [uiScale, setUiScale] = useState(clamp(initialSave.uiScale ?? 1, 0.8, 1.5));
+  const uiScaleRef = useRef(uiScale);
+  const [contactedResidents, setContactedResidents] = useState<number[]>(initialSave.contactedResidents ?? []);
+  const contactedResidentsRef = useRef(contactedResidents);
+  const [streetReputation, setStreetReputation] = useState<Record<number, number>>(initialSave.streetReputation ?? {});
+  const streetReputationRef = useRef(streetReputation);
+  const [activeStreetWalkerId, setActiveStreetWalkerId] = useState<number | null>(null);
+  const [streetTurn, setStreetTurn] = useState(0);
+  const [streetLine, setStreetLine] = useState("");
+  const [taxiTier, setTaxiTier] = useState<"economy" | "comfort" | "van">("economy");
+  const [taxiDestination, setTaxiDestination] = useState<"pervorechenskoe" | "highway" | "dinskaya">("dinskaya");
+  const [taxiStatus, setTaxiStatus] = useState("Выберите тариф и пункт назначения.");
+  const [radioStation, setRadioStation] = useState("Lo‑Fi Beats");
+  const [radioPlaying, setRadioPlaying] = useState(false);
 
   useEffect(() => {
     moneyRef.current = money;
@@ -1707,6 +1761,13 @@ export default function SecurityConsoleGame() {
         vehicleSiren: vehicleSirenRef.current,
         carClean: carCleanRef.current,
         seasonalTires: seasonalTiresRef.current,
+        streetReputation: streetReputationRef.current,
+        contactedResidents: contactedResidentsRef.current,
+        phoneNotes: phoneNotesRef.current,
+        phoneTheme: phoneThemeRef.current,
+        phoneWallpaper: phoneWallpaperRef.current,
+        phoneVolume: phoneVolumeRef.current,
+        uiScale: uiScaleRef.current,
       };
       const envelope = writeEnvelope(slot, saveName, save);
       setSaveSlots((current) => ({ ...current, [slot]: envelope }));
@@ -1764,6 +1825,21 @@ export default function SecurityConsoleGame() {
   }, [mode]);
 
   useEffect(() => {
+    let dpadUpPressed = false;
+    const timer = window.setInterval(() => {
+      const gamepad = navigator.getGamepads?.().find((item) => item?.connected);
+      const pressed = Boolean(gamepad?.buttons[12]?.pressed);
+      if (pressed && !dpadUpPressed && (modeRef.current === "world" || modeRef.current === "phone")) {
+        engineRef.current.keys.clear();
+        setPhoneApp("home");
+        setMode(modeRef.current === "phone" ? "world" : "phone");
+      }
+      dpadUpPressed = pressed;
+    }, 90);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     energyRef.current = energy;
   }, [energy]);
 
@@ -1809,6 +1885,16 @@ export default function SecurityConsoleGame() {
     carCleanRef.current = carClean;
     seasonalTiresRef.current = seasonalTires;
   }, [carClean, seasonalTires, vehicleSiren]);
+
+  useEffect(() => {
+    phoneThemeRef.current = phoneTheme;
+    phoneWallpaperRef.current = phoneWallpaper;
+    phoneVolumeRef.current = phoneVolume;
+    phoneNotesRef.current = phoneNotes;
+    uiScaleRef.current = uiScale;
+    contactedResidentsRef.current = contactedResidents;
+    streetReputationRef.current = streetReputation;
+  }, [contactedResidents, phoneNotes, phoneTheme, phoneVolume, phoneWallpaper, streetReputation, uiScale]);
 
   useEffect(() => {
     networkPlayersRef.current = networkPlayers;
@@ -2290,6 +2376,7 @@ export default function SecurityConsoleGame() {
       }
       pole.position.set(x, 0, 15);
       scene.add(pole);
+      engine.colliders.push({ x, z: 15, halfX: 0.42, halfZ: 0.42, kind: "landmark" });
     }
     for (let i = 0; i < poleXs.length - 1; i++) {
       const x1 = poleXs[i];
@@ -2418,6 +2505,10 @@ export default function SecurityConsoleGame() {
       scene.add(board);
       box(scene, [0.22, 4, 0.22], [x, 2, z - 3.5], 0x33423d);
       box(scene, [0.22, 4, 0.22], [x, 2, z + 3.5], 0x33423d);
+      engine.colliders.push(
+        { x, z: z - 3.5, halfX: 0.34, halfZ: 0.34, kind: "landmark" },
+        { x, z: z + 3.5, halfX: 0.34, halfZ: 0.34, kind: "landmark" },
+      );
     };
     makeRoadSign("ДИНСКАЯ", 205, -12);
     makeRoadSign("СЕЛО ПЕРВОРЕЧЕНСКОЕ", 3795, 14, true);
@@ -2455,8 +2546,10 @@ export default function SecurityConsoleGame() {
     console.info(`[NPCSpawner] Создано базовых NPC: ${engine.residents.length}`);
 
     const walkerColors = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
+    const walkerNames = ["Надежда", "Игорь", "Тамара", "Роман", "Людмила", "Аркадий", "Вера", "Михаил", "Лариса", "Степан", "Инна", "Виктор"];
     for (const villageX of [0, 4000]) {
       for (let i = 0; i < 12; i++) {
+        const walkerId = (villageX === 0 ? 100 : 200) + i;
         const walker = makePerson(walkerColors[i % walkerColors.length]);
         const laneZ = i % 2 === 0 ? -10.5 : 10.5;
         const minX = villageX - 150;
@@ -2464,14 +2557,28 @@ export default function SecurityConsoleGame() {
         const direction = (i % 3 === 0 ? -1 : 1) as 1 | -1;
         walker.position.set(minX + ((i * 29) % 280), 0, laneZ);
         walker.rotation.y = direction > 0 ? Math.PI / 2 : -Math.PI / 2;
+        const speechBubble = new THREE.Group();
+        speechBubble.name = "streetSpeechBubble";
+        const bubblePlate = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.72, 0.12), mat(0xf7f2df));
+        bubblePlate.position.y = 5.25;
+        speechBubble.add(bubblePlate);
+        for (const dotX of [-0.38, 0, 0.38]) {
+          const dot = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 4), mat(0x315c45));
+          dot.position.set(dotX, 5.25, -0.08);
+          speechBubble.add(dot);
+        }
+        walker.add(speechBubble);
         scene.add(walker);
         engine.walkers.push({
+          id: walkerId,
+          name: walkerNames[i],
           mesh: walker,
           minX,
           maxX,
           laneZ,
           direction,
           speed: 0.75 + (i % 4) * 0.14,
+          personalReputation: initialSave.streetReputation?.[walkerId] ?? 0,
         });
       }
     }
@@ -2580,6 +2687,17 @@ export default function SecurityConsoleGame() {
         setMode("world");
         return;
       }
+      if (e.code === "KeyO" && (modeRef.current === "world" || modeRef.current === "phone")) {
+        engine.keys.clear();
+        setPhoneApp("home");
+        setMode(modeRef.current === "phone" ? "world" : "phone");
+        return;
+      }
+      if (e.code === "Escape" && modeRef.current === "phone") {
+        engine.keys.clear();
+        setMode("world");
+        return;
+      }
       if (e.code === "Escape" && modeRef.current === "world") {
         engine.keys.clear();
         setMode("pause");
@@ -2594,6 +2712,12 @@ export default function SecurityConsoleGame() {
         engine.keys.clear();
         setMode("world");
         setActiveNpcId(null);
+        return;
+      }
+      if (e.code === "Escape" && modeRef.current === "street") {
+        engine.keys.clear();
+        setMode("world");
+        setActiveStreetWalkerId(null);
         return;
       }
       if (e.code === "Escape" && (modeRef.current === "station" || modeRef.current === "transit")) {
@@ -2652,8 +2776,20 @@ export default function SecurityConsoleGame() {
           setEnergy(Math.round(energyRef.current));
           setActiveNpcId(engine.nearest.id);
           setNpcLine(engine.nearest.greeting);
+          if (!contactedResidentsRef.current.includes(engine.nearest.id)) {
+            contactedResidentsRef.current = [...contactedResidentsRef.current, engine.nearest.id];
+            setContactedResidents(contactedResidentsRef.current);
+          }
           updateDailyChallengeRef.current("talks");
           setMode("dialogue");
+          return;
+        }
+        if (engine.nearestWalker) {
+          setActiveStreetWalkerId(engine.nearestWalker.id);
+          setStreetTurn(0);
+          setStreetLine(`${engine.nearestWalker.name}: «Слышали последние новости? В посёлке снова обсуждают безопасность домов.»`);
+          updateDailyChallengeRef.current("talks");
+          setMode("street");
         }
       }
       if (modeRef.current === "dialogue" && ["Digit1", "Digit2", "Digit3", "Digit4"].includes(e.code)) {
@@ -2776,7 +2912,7 @@ export default function SecurityConsoleGame() {
       animation = requestAnimationFrame(animate);
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
-      const canMove = modeRef.current === "world";
+      const canMove = modeRef.current === "world" || modeRef.current === "phone";
       const focus = engine.driving ? car : player;
       let currentMovement: MovementState = "Покой";
       let currentWalkSpeedKmh = 0;
@@ -2909,7 +3045,8 @@ export default function SecurityConsoleGame() {
         const forward = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
         const side = (engine.keys.has("right") ? 1 : 0) - (engine.keys.has("left") ? 1 : 0);
         const moving = Math.abs(forward) + Math.abs(side) > 0;
-        const jogging = moving && engine.keys.has("sprint") && energyRef.current > 10;
+        const usingPhone = modeRef.current === "phone";
+        const jogging = moving && !usingPhone && engine.keys.has("sprint") && energyRef.current > 10;
         const fastWalking = moving && !jogging && now < engine.fastWalkUntil;
         currentMovement = jogging ? "Бег трусцой" : fastWalking ? "Быстрый шаг" : moving ? "Шаг" : "Покой";
         const outfit = OUTFIT_BY_ID[outfitRef.current];
@@ -2917,7 +3054,7 @@ export default function SecurityConsoleGame() {
         const surfaceSpeed = surface === "Асфальт" ? 1 : surface === "Грунт" ? 0.95 * outfit.ground : 0.85 * outfit.ground;
         const fatigueSpeed = energyRef.current < 20 ? 0.7 : 1;
         const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.35;
-        const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed;
+        const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed * (usingPhone ? 0.38 : 1);
         currentWalkSpeedKmh = moving ? speed * 3.6 : 0;
         if (moving) {
           const angle = engine.yaw;
@@ -3136,8 +3273,19 @@ export default function SecurityConsoleGame() {
           }
         }
         engine.nearest = closest;
+        let closestWalker: Walker | null = null;
+        let closestWalkerDistance = closest ? 3.1 : 4.4;
+        for (const walker of engine.walkers) {
+          const distance = walker.mesh.position.distanceTo(player.position);
+          if (distance < closestWalkerDistance) {
+            closestWalker = walker;
+            closestWalkerDistance = distance;
+          }
+        }
+        engine.nearestWalker = closestWalker;
       } else {
         engine.nearest = null;
+        engine.nearestWalker = null;
       }
 
       const target = focus.position.clone();
@@ -3158,6 +3306,7 @@ export default function SecurityConsoleGame() {
         setEnergy(Math.round(energyRef.current));
         setGameTime(engine.time);
         setNearest(engine.nearest);
+        setNearestWalker(engine.nearestWalker);
         setNearCar(Boolean(currentVehicleRef.current) && car.visible && !engine.driving && player.position.distanceTo(car.position) < 5.2);
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
         setCarPos({ x: car.position.x, z: car.position.z });
@@ -3950,6 +4099,128 @@ export default function SecurityConsoleGame() {
     setMode("intro");
   };
 
+  const handleStreetReply = (quality: "ideal" | "friendly" | "poor") => {
+    const walker = engineRef.current.walkers.find((item) => item.id === activeStreetWalkerId);
+    if (!walker) return;
+    const delta = quality === "ideal" ? 3 : quality === "friendly" ? 1 : -1;
+    const previous = streetReputationRef.current[walker.id] ?? walker.personalReputation;
+    const nextPersonal = clamp(previous + delta, -10, 20);
+    walker.personalReputation = nextPersonal;
+    const nextStreetReputation = { ...streetReputationRef.current, [walker.id]: nextPersonal };
+    streetReputationRef.current = nextStreetReputation;
+    setStreetReputation(nextStreetReputation);
+    let nextGeneralReputation = reputation;
+    if (quality === "ideal") {
+      nextGeneralReputation = clamp(reputation + 1, 0, 100);
+      setReputation(nextGeneralReputation);
+      setStreetLine(`${walker.name}: «Вот это по-человечески. Расскажу соседям, что вам можно доверять.»`);
+    } else if (quality === "friendly") {
+      setStreetLine(`${walker.name}: «Спасибо, приятно было поговорить. Буду иметь в виду вашу охрану.»`);
+    } else {
+      setStreetLine(`${walker.name}: «Наверное, поговорим в другой раз.»`);
+    }
+    const nextTurn = streetTurn + 1;
+    setStreetTurn(nextTurn);
+    if (previous < 10 && nextPersonal >= 10) {
+      const recommended = residentsRef.current.find((resident) => !resident.signed);
+      if (recommended) {
+        recommended.interest = clamp(recommended.interest + 10, 0, 100);
+        setResidents([...residentsRef.current]);
+        window.setTimeout(() => flash(`${walker.name} рекомендует вас: ${recommended.name} · интерес +10%`), 300);
+      }
+    }
+    persist(residentsRef.current, money, nextGeneralReputation);
+    if (quality === "poor" || nextTurn >= 3) {
+      window.setTimeout(() => {
+        setMode("world");
+        setActiveStreetWalkerId(null);
+        flash(delta > 0 ? `Уличная беседа · личная репутация +${delta}` : "Собеседник обиделся · личная репутация −1");
+      }, 900);
+    }
+  };
+
+  const rememberContact = (residentId: number) => {
+    if (contactedResidentsRef.current.includes(residentId)) return;
+    contactedResidentsRef.current = [...contactedResidentsRef.current, residentId];
+    setContactedResidents(contactedResidentsRef.current);
+  };
+
+  const contactResidentByPhone = (residentId: number, kind: "call" | "message") => {
+    const resident = residentsRef.current.find((item) => item.id === residentId);
+    if (!resident) return;
+    rememberContact(residentId);
+    resident.interest = clamp(resident.interest + (kind === "call" ? 2 : 1), 0, 100);
+    setResidents([...residentsRef.current]);
+    persistRef.current();
+    flash(`${kind === "call" ? "Звонок" : "Сообщение"}: ${resident.name} · интерес +${kind === "call" ? 2 : 1}%`);
+  };
+
+  const routeToResident = (residentId: number) => {
+    const resident = residentsRef.current.find((item) => item.id === residentId);
+    if (!resident) return;
+    setMapWaypoint({ x: resident.x, z: resident.z, label: `${resident.name} · ${resident.address}` });
+    setMode("world");
+    flash(`Маршрут к адресу ${resident.address} построен`);
+  };
+
+  const requestTaxi = () => {
+    const destinations = {
+      pervorechenskoe: { label: "село Первореченское", x: 80, z: 8 },
+      highway: { label: "остановка «Трасса»", x: 2000, z: 8 },
+      dinskaya: { label: "ст. Динская", x: 3920, z: 8 },
+    };
+    const tiers = {
+      economy: { label: "Эконом", base: 100, perKm: 10, wait: "2–3 мин." },
+      comfort: { label: "Комфорт", base: 250, perKm: 15, wait: "1–2 мин." },
+      van: { label: "Микроавтобус", base: 500, perKm: 20, wait: "2 мин." },
+    };
+    const destination = destinations[taxiDestination];
+    const tier = tiers[taxiTier];
+    const distanceKm = Math.hypot(destination.x - playerPos.x, destination.z - playerPos.z) / 1000;
+    const price = Math.round(tier.base + distanceKm * tier.perKm);
+    if (money < price) {
+      setTaxiStatus(`Недостаточно средств: поездка стоит ${price.toLocaleString("ru-RU")} ₽.`);
+      return;
+    }
+    const nextMoney = money - price;
+    setMoney(nextMoney);
+    setTaxiStatus(`${tier.label}: машина подана. Поездка до ${destination.label}…`);
+    window.setTimeout(() => {
+      const player = engineRef.current.player;
+      if (player) player.position.set(destination.x, 0, destination.z);
+      setPlayerPos({ x: destination.x, z: destination.z });
+      setTaxiStatus(`Поездка завершена · оплачено ${price.toLocaleString("ru-RU")} ₽.`);
+      persist(residentsRef.current, nextMoney, reputation);
+      setMode("world");
+      flash(`Такси доставило вас: ${destination.label} · −${price.toLocaleString("ru-RU")} ₽`);
+    }, 2600);
+  };
+
+  const capturePhonePhoto = () => {
+    const canvas = engineRef.current.renderer?.domElement;
+    if (!canvas) return flash("Камера пока недоступна");
+    try {
+      const link = document.createElement("a");
+      link.download = `pult-ohrany-${Date.now()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      flash("Снимок мира сохранён без интерфейса");
+    } catch {
+      flash("Браузер запретил сохранение снимка");
+    }
+  };
+
+  const savePhoneNote = () => {
+    const note = phoneNoteDraft.trim().slice(0, 180);
+    if (!note) return;
+    const next = [note, ...phoneNotesRef.current].slice(0, 30);
+    phoneNotesRef.current = next;
+    setPhoneNotes(next);
+    setPhoneNoteDraft("");
+    persistRef.current();
+    flash("Заметка сохранена и синхронизирована с планшетом");
+  };
+
   const startNetworkGame = () => {
     if (!networkIsHost) return;
     sendNetworkMessage({ type: "start" });
@@ -4045,6 +4316,14 @@ export default function SecurityConsoleGame() {
     setMapWaypoint(waypoint);
     setSelectedMapObject("Маршрут построен. ПКМ по карте перенесёт точку.");
   };
+  const activeStreetWalker = engineRef.current.walkers.find((walker) => walker.id === activeStreetWalkerId) ?? null;
+  const phoneContacts = residents.filter((resident) => contactedResidents.includes(resident.id));
+  const taxiTarget = taxiDestination === "pervorechenskoe" ? { x: 80, z: 8 } : taxiDestination === "highway" ? { x: 2000, z: 8 } : { x: 3920, z: 8 };
+  const taxiDistanceKm = Math.hypot(taxiTarget.x - playerPos.x, taxiTarget.z - playerPos.z) / 1000;
+  const taxiPreviewPrice = Math.round(
+    (taxiTier === "economy" ? 100 : taxiTier === "comfort" ? 250 : 500) +
+    taxiDistanceKm * (taxiTier === "economy" ? 10 : taxiTier === "comfort" ? 15 : 20),
+  );
 
   return (
     <main
@@ -4057,6 +4336,7 @@ export default function SecurityConsoleGame() {
               ? "weather-cloudy"
               : "weather-clear"
       }`}
+      style={{ "--game-ui-scale": uiScale } as CSSProperties}
       aria-label="Игра Пульт охраны"
     >
       <div className="world-viewport" ref={mountRef} aria-label="Трёхмерный посёлок" />
@@ -4101,7 +4381,7 @@ export default function SecurityConsoleGame() {
             {driving ? (
               <><kbd>WASD</kbd> вести <kbd>Space</kbd> ручник <kbd>ПКМ</kbd> осмотреться <kbd>E</kbd> выйти</>
             ) : (
-              <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>Tab</kbd> карта <kbd>P</kbd> планшет</>
+              <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>Tab</kbd> карта <kbd>P</kbd> планшет <kbd>O</kbd> телефон</>
             )}
           </div>
           <div className="route-card">
@@ -4180,16 +4460,124 @@ export default function SecurityConsoleGame() {
               <span>{busEtaMinutes < 0 ? "Автобусы с 06:00" : busReadyAtStop ? "Сесть в автобус" : `Автобус примерно через ${busEtaMinutes} мин`}</span>
             </div>
           )}
-          {mode === "world" && !nearStationId && !nearBusStopId && (nearest || (driving && carTelemetry.speed < 5)) && (
+          {mode === "world" && !nearStationId && !nearBusStopId && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
-              <span>{driving ? "Выйти из машины" : `Поговорить · ${nearest?.name}`}</span>
+              <span>{driving ? "Выйти из машины" : nearest ? `Обсудить договор · ${nearest.name}` : `Поговорить на улице · ${nearestWalker?.name}`}</span>
             </div>
           )}
-          {mode === "world" && !driving && currentVehicle && nearCar && !nearest && !nearStationId && !nearBusStopId && (
+          {mode === "world" && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearStationId && !nearBusStopId && (
             <div className="interaction-prompt"><span className="key">E</span><span>Сесть в {VEHICLE_BY_ID[currentVehicle].name.toLowerCase()}</span></div>
           )}
         </div>
+      )}
+
+      {mode === "phone" && (
+        <section className="phone-layer" onClick={() => setMode("world")} aria-label="Игровой смартфон">
+          <div className={`phone-frame theme-${phoneTheme} wallpaper-${phoneWallpaper}`} onClick={(event) => event.stopPropagation()}>
+            <div className="phone-speaker" />
+            <header className="phone-status">
+              <b>{timeLabel}</b>
+              <span>{radioPlaying ? `♫ ${radioStation}` : "ПУЛЬТ · LTE"}　▮▮▮</span>
+            </header>
+            <div className="phone-titlebar">
+              {phoneApp !== "home" ? <button onClick={() => setPhoneApp("home")}>‹</button> : <span />}
+              <div><small>Смартфон Алексея</small><b>{phoneApp === "home" ? "Главный экран" : phoneApp === "taxi" ? "Такси" : phoneApp === "contacts" ? "Контакты" : phoneApp === "notifications" ? "Уведомления" : phoneApp === "camera" ? "Камера" : phoneApp === "radio" ? "Радио и музыка" : phoneApp === "notes" ? "Заметки" : "Настройки"}</b></div>
+              <button onClick={() => setMode("world")}>×</button>
+            </div>
+            <div className="phone-screen">
+              {phoneApp === "home" && (
+                <>
+                  <div className="phone-hero-widget"><span>{weather}</span><b>{timeLabel}</b><small>{locationName}</small></div>
+                  <div className="phone-app-grid">
+                    {([
+                      ["taxi", "🚕", "Такси"],
+                      ["contacts", "👤", "Контакты"],
+                      ["notifications", "🔔", "Сигналы"],
+                      ["camera", "📷", "Камера"],
+                      ["radio", "♫", "Радио"],
+                      ["notes", "▤", "Заметки"],
+                      ["settings", "⚙", "Настройки"],
+                    ] as [PhoneApp, string, string][]).map(([app, icon, label]) => (
+                      <button key={app} onClick={() => setPhoneApp(app)}><i>{icon}</i><span>{label}</span></button>
+                    ))}
+                  </div>
+                  <div className="phone-tip"><b>Дела на сегодня</b><span>{totalContracts}/10 договоров · {money.toLocaleString("ru-RU")} ₽</span><small>Телефон открыт: Алексей может идти медленным шагом.</small></div>
+                </>
+              )}
+              {phoneApp === "taxi" && (
+                <div className="phone-page taxi-app">
+                  <div className="taxi-mini-map"><span style={{ left: `${clamp((playerPos.x + 180) / 4360 * 100, 4, 96)}%` }}>Вы</span><i /></div>
+                  <label>Куда?
+                    <select value={taxiDestination} onChange={(event) => setTaxiDestination(event.target.value as typeof taxiDestination)}>
+                      <option value="pervorechenskoe">село Первореченское</option>
+                      <option value="highway">Остановка «Трасса»</option>
+                      <option value="dinskaya">ст. Динская</option>
+                    </select>
+                  </label>
+                  <div className="taxi-tiers">
+                    {([
+                      ["economy", "Эконом", "100 ₽ + 10 ₽/км", "2–3 мин."],
+                      ["comfort", "Комфорт", "250 ₽ + 15 ₽/км", "1–2 мин."],
+                      ["van", "Микроавтобус", "500 ₽ + 20 ₽/км", "для оборудования"],
+                    ] as const).map(([id, label, price, wait]) => <button className={taxiTier === id ? "active" : ""} key={id} onClick={() => setTaxiTier(id)}><b>{label}</b><span>{price}</span><small>{wait}</small></button>)}
+                  </div>
+                  <div className="taxi-order"><span>≈ {taxiDistanceKm.toFixed(2)} км</span><b>{taxiPreviewPrice.toLocaleString("ru-RU")} ₽</b><button onClick={requestTaxi}>Вызвать такси</button></div>
+                  <p>{taxiStatus}</p>
+                </div>
+              )}
+              {phoneApp === "contacts" && (
+                <div className="phone-page phone-contacts">
+                  <p>{phoneContacts.length ? `Знакомых жителей: ${phoneContacts.length}` : "Контакты появятся после первого личного разговора."}</p>
+                  {phoneContacts.map((resident) => <article key={resident.id}>
+                    <i style={{ background: `#${resident.color.toString(16).padStart(6, "0")}` }}>{resident.name.slice(0, 1)}</i>
+                    <div><b>{resident.name}</b><span>{resident.signed ? "Договор подписан" : `${resident.interest}% интереса`}</span><small>{resident.address}</small></div>
+                    <nav><button title="Позвонить" onClick={() => contactResidentByPhone(resident.id, "call")}>☎</button><button title="Написать" onClick={() => contactResidentByPhone(resident.id, "message")}>✉</button><button title="Маршрут" onClick={() => routeToResident(resident.id)}>◎</button></nav>
+                  </article>)}
+                </div>
+              )}
+              {phoneApp === "notifications" && (
+                <div className="phone-page phone-notifications">
+                  <article className={alarm ? "urgent" : ""}><i>⚠</i><div><b>{alarm ? `Тревога: ${alarm.type}` : "Пульт охраны"}</b><span>{alarm ? `${alarm.address} · осталось ${alarmSeconds} сек.` : alarmResult}</span><small>сейчас</small></div></article>
+                  <article><i>▣</i><div><b>Договоры</b><span>Активно объектов: {totalContracts}. До открытия пульта: {Math.max(0, 10 - signedCount)}.</span><small>сводка</small></div></article>
+                  <article><i>🚌</i><div><b>Автобус №21</b><span>{busEtaMinutes < 0 ? "Движение завершено" : busReadyAtStop ? "Автобус на остановке" : `До ближайшей остановки ≈ ${busEtaMinutes} мин.`}</span><small>маршрут</small></div></article>
+                </div>
+              )}
+              {phoneApp === "camera" && (
+                <div className="phone-page phone-camera">
+                  <div className="camera-viewfinder"><span>Мир без HUD</span><i /><b>Первореченское · {timeLabel}</b></div>
+                  <button onClick={capturePhonePhoto}><i />Сделать снимок</button>
+                  <p>Файл PNG сохраняется на устройство без элементов игрового интерфейса.</p>
+                </div>
+              )}
+              {phoneApp === "radio" && (
+                <div className="phone-page phone-radio">
+                  <div className={`radio-cover ${radioPlaying ? "playing" : ""}`}><i>♫</i><b>{radioStation}</b><span>{radioPlaying ? "В эфире" : "Пауза"}</span></div>
+                  {["Ретро FM", "Дорожное радио", "Lo‑Fi Beats"].map((station) => <button className={radioStation === station ? "active" : ""} key={station} onClick={() => { setRadioStation(station); setRadioPlaying(true); }}><b>{station}</b><span>{station === "Lo‑Fi Beats" ? "Спокойная музыка для обходов" : "Музыка и новости дороги"}</span></button>)}
+                  <button className="radio-toggle" onClick={() => setRadioPlaying((value) => !value)}>{radioPlaying ? "Поставить на паузу" : "Продолжить воспроизведение"}</button>
+                </div>
+              )}
+              {phoneApp === "notes" && (
+                <div className="phone-page phone-notes">
+                  <textarea value={phoneNoteDraft} maxLength={180} placeholder="Например: зайти к Семёну после 18:00…" onChange={(event) => setPhoneNoteDraft(event.target.value)} />
+                  <button onClick={savePhoneNote}>Сохранить заметку</button>
+                  {phoneNotes.map((note, index) => <article key={`${note}-${index}`}><span>{note}</span><button onClick={() => { const next = phoneNotesRef.current.filter((_, itemIndex) => itemIndex !== index); phoneNotesRef.current = next; setPhoneNotes(next); persistRef.current(); }}>×</button></article>)}
+                </div>
+              )}
+              {phoneApp === "settings" && (
+                <div className="phone-page phone-settings">
+                  <label>Тема<select value={phoneTheme} onChange={(event) => { const value = event.target.value as PhoneTheme; phoneThemeRef.current = value; setPhoneTheme(value); window.setTimeout(() => persistRef.current(), 0); }}><option value="dark">Тёмная</option><option value="light">Светлая</option></select></label>
+                  <label>Обои<select value={phoneWallpaper} onChange={(event) => { const value = event.target.value as PhoneWallpaper; phoneWallpaperRef.current = value; setPhoneWallpaper(value); window.setTimeout(() => persistRef.current(), 0); }}><option value="village">Посёлок</option><option value="night">Ночная трасса</option><option value="forest">Лес</option></select></label>
+                  <label>Громкость звонка <b>{phoneVolume}%</b><input type="range" min="0" max="100" value={phoneVolume} onChange={(event) => { const value = Number(event.target.value); phoneVolumeRef.current = value; setPhoneVolume(value); }} onPointerUp={() => persistRef.current()} /></label>
+                  <label>Размер интерфейса <b>{uiScale.toFixed(1)}×</b><input type="range" min="0.8" max="1.5" step="0.1" value={uiScale} onChange={(event) => { const value = Number(event.target.value); uiScaleRef.current = value; setUiScale(value); }} onPointerUp={() => persistRef.current()} /></label>
+                  <button onClick={() => { uiScaleRef.current = 1; setUiScale(1); persistRef.current(); }}>Сбросить масштаб до 1.0×</button>
+                  <small>Масштаб применяется к HUD, окнам, планшету и смартфону и сохраняется локально.</small>
+                </div>
+              )}
+            </div>
+            <footer className="phone-homebar"><button onClick={() => setPhoneApp("home")} aria-label="На главный экран" /></footer>
+          </div>
+        </section>
       )}
 
       {mode === "station" && stationMenu && (
@@ -4351,6 +4739,25 @@ export default function SecurityConsoleGame() {
                 {activeNpc.interest >= 70 ? "Предложить договор →" : `Нужно ещё ${70 - activeNpc.interest}%`}
               </button>
             </div>
+          </div>
+        </section>
+      )}
+
+      {mode === "street" && activeStreetWalker && (
+        <section className="overlay street-dialogue" aria-label={`Уличная беседа с ${activeStreetWalker.name}`}>
+          <div className="street-dialogue-card">
+            <header>
+              <div className="street-portrait">{activeStreetWalker.name.slice(0, 1)}</div>
+              <div><small>Уличное общение · беседа {Math.min(streetTurn + 1, 3)}/3</small><h2>{activeStreetWalker.name}</h2></div>
+              <span><small>Личная репутация</small><b>{streetReputation[activeStreetWalker.id] ?? 0}</b></span>
+            </header>
+            <p>{streetLine}</p>
+            <div className="street-choices">
+              <button onClick={() => handleStreetReply("ideal")}><b>Внимательно выслушать и дать полезный совет</b><small>Красноречие · личная репутация +3, общая +1</small></button>
+              <button onClick={() => handleStreetReply("friendly")}><b>Поддержать разговор по-соседски</b><small>Доброжелательный ответ · личная репутация +1</small></button>
+              <button onClick={() => handleStreetReply("poor")}><b>Ответить резко и закончить разговор</b><small>Собеседник обидится · личная репутация −1</small></button>
+            </div>
+            <footer><span>{(streetReputation[activeStreetWalker.id] ?? 0) >= 10 ? "★ Адвокат: рекомендует вас соседям" : "При 10 очках житель начнёт рекомендовать вашу фирму"}</span><button onClick={() => { setMode("world"); setActiveStreetWalkerId(null); }}>Esc · Уйти</button></footer>
           </div>
         </section>
       )}
