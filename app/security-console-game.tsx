@@ -45,6 +45,10 @@ type ProceduralAudioEngine = {
   windLevel: GainNode;
   radioTone: OscillatorNode;
   radioLevel: GainNode;
+  vehicleEngine: OscillatorNode;
+  vehicleLevel: GainNode;
+  tireTone: OscillatorNode;
+  tireLevel: GainNode;
 };
 
 type StaffState = {
@@ -199,6 +203,7 @@ type SaveData = {
   phoneVolume?: number;
   uiScale?: number;
   audioMix?: AudioMix;
+  customRadioUrl?: string;
 };
 
 type SaveEnvelope = {
@@ -772,6 +777,7 @@ const DEFAULT_SAVE: SaveData = {
   phoneVolume: 70,
   uiScale: 1,
   audioMix: DEFAULT_AUDIO_MIX,
+  customRadioUrl: "",
 };
 
 function checksum(data: SaveData) {
@@ -830,6 +836,7 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
       alerts: clamp(value?.audioMix?.alerts ?? DEFAULT_AUDIO_MIX.alerts, 30, 100),
       voice: clamp(value?.audioMix?.voice ?? DEFAULT_AUDIO_MIX.voice, 0, 100),
     },
+    customRadioUrl: typeof value?.customRadioUrl === "string" ? value.customRadioUrl.slice(0, 500) : "",
     carFuel: value?.carFuel === undefined ? (ownedVehicles.length > 0 ? 20 : 0) : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
 }
@@ -1781,6 +1788,13 @@ export default function SecurityConsoleGame() {
   const [taxiStatus, setTaxiStatus] = useState("Выберите тариф и пункт назначения.");
   const [radioStation, setRadioStation] = useState("Lo‑Fi Beats");
   const [radioPlaying, setRadioPlaying] = useState(false);
+  const [radioMode, setRadioMode] = useState<"local" | "stream">("local");
+  const [customRadioUrl, setCustomRadioUrl] = useState(initialSave.customRadioUrl ?? "");
+  const customRadioUrlRef = useRef(customRadioUrl);
+  const [radioStreamStatus, setRadioStreamStatus] = useState("Офлайн-радио готово");
+  const radioStreamRef = useRef<HTMLAudioElement | null>(null);
+  const radioReconnectTimerRef = useRef<number | null>(null);
+  const lastAmbientSoundAtRef = useRef(0);
 
   useEffect(() => {
     moneyRef.current = money;
@@ -1886,6 +1900,7 @@ export default function SecurityConsoleGame() {
         phoneVolume: phoneVolumeRef.current,
         uiScale: uiScaleRef.current,
         audioMix: audioMixRef.current,
+        customRadioUrl: customRadioUrlRef.current,
       };
       const envelope = writeEnvelope(slot, saveName, save);
       setSaveSlots((current) => ({ ...current, [slot]: envelope }));
@@ -1994,7 +2009,47 @@ export default function SecurityConsoleGame() {
     radioTone.connect(radioFilter).connect(radioLevel).connect(radio);
     radioTone.start();
 
-    audio = { context, master, music, radio, ambient, sfx, alerts, voice, wind, windLevel, radioTone, radioLevel };
+    const vehicleEngine = context.createOscillator();
+    const vehicleFilter = context.createBiquadFilter();
+    const vehicleLevel = context.createGain();
+    vehicleEngine.type = "sawtooth";
+    vehicleEngine.frequency.value = 48;
+    vehicleFilter.type = "lowpass";
+    vehicleFilter.frequency.value = 420;
+    vehicleLevel.gain.value = 0;
+    vehicleEngine.connect(vehicleFilter).connect(vehicleLevel).connect(sfx);
+    vehicleEngine.start();
+
+    const tireTone = context.createOscillator();
+    const tireFilter = context.createBiquadFilter();
+    const tireLevel = context.createGain();
+    tireTone.type = "triangle";
+    tireTone.frequency.value = 170;
+    tireFilter.type = "bandpass";
+    tireFilter.frequency.value = 520;
+    tireFilter.Q.value = 0.7;
+    tireLevel.gain.value = 0;
+    tireTone.connect(tireFilter).connect(tireLevel).connect(sfx);
+    tireTone.start();
+
+    audio = {
+      context,
+      master,
+      music,
+      radio,
+      ambient,
+      sfx,
+      alerts,
+      voice,
+      wind,
+      windLevel,
+      radioTone,
+      radioLevel,
+      vehicleEngine,
+      vehicleLevel,
+      tireTone,
+      tireLevel,
+    };
     audioEngineRef.current = audio;
     applyAudioMix(audioMixRef.current);
     return audio;
@@ -2043,6 +2098,37 @@ export default function SecurityConsoleGame() {
     source.start(now);
   }, [ensureAudio]);
 
+  const playVehicleHorn = useCallback(() => {
+    const audio = ensureAudio();
+    const now = audio.context.currentTime;
+    for (const [frequency, delay] of [[196, 0], [246.94, 0.018]] as const) {
+      const oscillator = audio.context.createOscillator();
+      const level = audio.context.createGain();
+      oscillator.type = "square";
+      oscillator.frequency.value = frequency;
+      level.gain.setValueAtTime(0.045, now + delay);
+      level.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+      oscillator.connect(level).connect(audio.sfx);
+      oscillator.start(now + delay);
+      oscillator.stop(now + 0.3);
+    }
+  }, [ensureAudio]);
+
+  const playAmbientDetail = useCallback((night: boolean) => {
+    const audio = ensureAudio();
+    const now = audio.context.currentTime;
+    const oscillator = audio.context.createOscillator();
+    const level = audio.context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(night ? 760 : 1350, now);
+    oscillator.frequency.exponentialRampToValueAtTime(night ? 520 : 2100, now + 0.16);
+    level.gain.setValueAtTime(night ? 0.008 : 0.012, now);
+    level.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    oscillator.connect(level).connect(audio.ambient);
+    oscillator.start(now);
+    oscillator.stop(now + 0.34);
+  }, [ensureAudio]);
+
   useEffect(() => {
     applyAudioMix(audioMix);
   }, [applyAudioMix, audioMix]);
@@ -2061,11 +2147,33 @@ export default function SecurityConsoleGame() {
     const busRadio = mode === "busRide";
     audio.radioTone.frequency.setTargetAtTime(busRadio ? 146.83 : frequencies[radioStation] ?? 110, now, 0.3);
     audio.radioLevel.gain.setTargetAtTime(
-      busRadio ? 0.009 : radioPlaying ? 0.026 * (phoneVolume / 100) : 0,
+      radioMode === "stream" ? 0 : busRadio ? 0.009 : radioPlaying ? 0.026 * (phoneVolume / 100) : 0,
       now,
       0.15,
     );
-  }, [mode, phoneVolume, radioPlaying, radioStation]);
+    const stream = radioStreamRef.current;
+    if (stream) {
+      stream.volume = clamp(
+        (audioMixRef.current.master / 100) * (audioMixRef.current.radio / 100) * (phoneVolume / 100),
+        0,
+        1,
+      );
+      if (!radioPlaying || radioMode !== "stream") {
+        stream.pause();
+      } else if (stream.paused) {
+        void stream.play().catch(() => setRadioStreamStatus("Браузер ждёт повторного нажатия «Включить эфир»"));
+      }
+    }
+  }, [audioMix, mode, phoneVolume, radioMode, radioPlaying, radioStation]);
+
+  useEffect(() => () => {
+    if (radioReconnectTimerRef.current !== null) window.clearTimeout(radioReconnectTimerRef.current);
+    radioStreamRef.current?.pause();
+    radioStreamRef.current = null;
+    const audio = audioEngineRef.current;
+    if (audio) void audio.context.close();
+    audioEngineRef.current = null;
+  }, []);
 
   useEffect(() => {
     let dpadUpPressed = false;
@@ -2136,9 +2244,10 @@ export default function SecurityConsoleGame() {
     phoneNotesRef.current = phoneNotes;
     uiScaleRef.current = uiScale;
     audioMixRef.current = audioMix;
+    customRadioUrlRef.current = customRadioUrl;
     contactedResidentsRef.current = contactedResidents;
     streetReputationRef.current = streetReputation;
-  }, [audioMix, contactedResidents, phoneNotes, phoneTheme, phoneVolume, phoneWallpaper, streetReputation, uiScale]);
+  }, [audioMix, contactedResidents, customRadioUrl, phoneNotes, phoneTheme, phoneVolume, phoneWallpaper, streetReputation, uiScale]);
 
   useEffect(() => {
     networkPlayersRef.current = networkPlayers;
@@ -3206,6 +3315,9 @@ export default function SecurityConsoleGame() {
       if (document.hidden) clearInput();
     };
     const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 0 && engine.driving && modeRef.current === "world") {
+        playVehicleHorn();
+      }
       if (e.button === 2) {
         mouseDown = true;
         engine.cameraInputAt = performance.now();
@@ -3752,8 +3864,24 @@ export default function SecurityConsoleGame() {
           const night = engine.time >= 21 || engine.time < 6;
           const storm = weatherRef.current === "Гроза";
           const rain = weatherRef.current === "Дождь" || storm;
-          activeAudio.wind.frequency.setTargetAtTime(storm ? 72 : night ? 39 : 48, activeAudio.context.currentTime, 0.8);
-          activeAudio.windLevel.gain.setTargetAtTime(rain ? 0.025 : night ? 0.008 : 0.012, activeAudio.context.currentTime, 0.8);
+          const audioNow = activeAudio.context.currentTime;
+          activeAudio.wind.frequency.setTargetAtTime(storm ? 72 : night ? 39 : 48, audioNow, 0.8);
+          activeAudio.windLevel.gain.setTargetAtTime(rain ? 0.025 : night ? 0.008 : 0.012, audioNow, 0.8);
+          const nearestTrafficDistance = engine.traffic.reduce(
+            (distance, vehicle) => Math.min(distance, Math.hypot(vehicle.mesh.position.x - focus.position.x, vehicle.mesh.position.z - focus.position.z)),
+            100,
+          );
+          const heardTraffic = clamp(1 - nearestTrafficDistance / 42, 0, 0.38);
+          const vehiclePresence = engine.driving ? 1 : ridingBus ? 0.58 : heardTraffic;
+          const audibleSpeed = engine.driving ? Math.abs(engine.carSpeed) : ridingBus ? 16.67 : 8 + heardTraffic * 18;
+          activeAudio.vehicleEngine.frequency.setTargetAtTime(46 + audibleSpeed * 4.5, audioNow, 0.06);
+          activeAudio.vehicleLevel.gain.setTargetAtTime(vehiclePresence * (0.018 + audibleSpeed * 0.0012), audioNow, 0.08);
+          activeAudio.tireTone.frequency.setTargetAtTime(engine.surface === "Грунт" ? 310 : 190 + audibleSpeed * 3, audioNow, 0.08);
+          activeAudio.tireLevel.gain.setTargetAtTime(vehiclePresence * audibleSpeed * (engine.surface === "Грунт" ? 0.0011 : 0.00045), audioNow, 0.08);
+          if (!engine.driving && modeRef.current === "world" && now - lastAmbientSoundAtRef.current > 12000) {
+            lastAmbientSoundAtRef.current = now;
+            playAmbientDetail(night);
+          }
         }
         setCarTelemetry({
           speed: Math.round(Math.abs(engine.carSpeed) * 3.6),
@@ -4707,6 +4835,86 @@ export default function SecurityConsoleGame() {
     ensureAudio();
   };
 
+  function stopRadioStream(keepStatus = false) {
+    if (radioReconnectTimerRef.current !== null) {
+      window.clearTimeout(radioReconnectTimerRef.current);
+      radioReconnectTimerRef.current = null;
+    }
+    const stream = radioStreamRef.current;
+    if (stream) {
+      stream.onplaying = null;
+      stream.onwaiting = null;
+      stream.onstalled = null;
+      stream.onerror = null;
+      stream.pause();
+      stream.removeAttribute("src");
+      stream.load();
+      radioStreamRef.current = null;
+    }
+    if (!keepStatus) setRadioStreamStatus("Офлайн-радио готово");
+  }
+
+  function startRadioStream(urlOverride?: string, attempt = 0) {
+    const url = (urlOverride ?? customRadioUrlRef.current).trim();
+    if (!/^https:\/\/\S+$/i.test(url)) {
+      setRadioStreamStatus("Нужна прямая HTTPS-ссылка на MP3, AAC или OGG-поток");
+      return;
+    }
+    ensureAudio();
+    stopRadioStream(true);
+    customRadioUrlRef.current = url;
+    setCustomRadioUrl(url);
+    setRadioMode("stream");
+    setRadioStation("Интернет-эфир");
+    setRadioPlaying(true);
+    setRadioStreamStatus(attempt ? `Повторное подключение ${attempt + 1}/3…` : "Подключение к эфиру…");
+
+    const stream = new Audio();
+    stream.preload = "none";
+    stream.src = url;
+    stream.volume = clamp(
+      (audioMixRef.current.master / 100) * (audioMixRef.current.radio / 100) * (phoneVolumeRef.current / 100),
+      0,
+      1,
+    );
+    radioStreamRef.current = stream;
+    stream.onplaying = () => {
+      setRadioStreamStatus("Прямой эфир · подключено");
+      setRadioMode("stream");
+      setRadioPlaying(true);
+      persistRef.current();
+    };
+    stream.onwaiting = () => setRadioStreamStatus("Буферизация потока…");
+    stream.onstalled = () => setRadioStreamStatus("Связь прервалась · пробуем восстановить");
+    stream.onerror = () => {
+      if (radioStreamRef.current === stream) radioStreamRef.current = null;
+      stream.onplaying = null;
+      stream.onwaiting = null;
+      stream.onstalled = null;
+      stream.onerror = null;
+      stream.pause();
+      if (attempt < 2) {
+        const delay = 1800 * (attempt + 1);
+        setRadioStreamStatus(`Ошибка потока · повтор через ${Math.round(delay / 1000)} сек.`);
+        radioReconnectTimerRef.current = window.setTimeout(() => startRadioStream(url, attempt + 1), delay);
+      } else {
+        setRadioMode("local");
+        setRadioStation("Lo‑Fi Beats");
+        setRadioPlaying(true);
+        setRadioStreamStatus("Поток недоступен · включено офлайн-радио");
+      }
+    };
+    void stream.play().catch(() => setRadioStreamStatus("Нажмите «Включить эфир» ещё раз — браузер заблокировал запуск"));
+  }
+
+  const selectLocalRadio = (station: string) => {
+    stopRadioStream();
+    ensureAudio();
+    setRadioMode("local");
+    setRadioStation(station);
+    setRadioPlaying(true);
+  };
+
   const startNetworkGame = () => {
     if (!networkIsHost) return;
     sendNetworkMessage({ type: "start" });
@@ -5045,8 +5253,15 @@ export default function SecurityConsoleGame() {
               )}
               {phoneApp === "radio" && (
                 <div className="phone-page phone-radio">
-                  <div className={`radio-cover ${radioPlaying ? "playing" : ""}`}><i>♫</i><b>{radioStation}</b><span>{radioPlaying ? "В эфире" : "Пауза"}</span></div>
-                  {["Ретро FM", "Дорожное радио", "Вести посёлка", "Пультовая волна", "Lo‑Fi Beats"].map((station) => <button className={radioStation === station ? "active" : ""} key={station} onClick={() => { ensureAudio(); setRadioStation(station); setRadioPlaying(true); }}><b>{station}</b><span>{station === "Lo‑Fi Beats" ? "Оригинальный спокойный синтезированный фон" : station === "Вести посёлка" ? `Новости: ${locationName}, ${weather.toLowerCase()}` : station === "Пультовая волна" ? "Переговоры диспетчера и экипажей" : "Оригинальная музыкальная программа дороги"}</span></button>)}
+                  <div className={`radio-cover ${radioPlaying ? "playing" : ""}`}><i>♫</i><b>{radioStation}</b><span>{radioMode === "stream" ? radioStreamStatus : radioPlaying ? "Офлайн-эфир" : "Пауза"}</span></div>
+                  {["Ретро FM", "Дорожное радио", "Вести посёлка", "Пультовая волна", "Lo‑Fi Beats"].map((station) => <button className={radioMode === "local" && radioStation === station ? "active" : ""} key={station} onClick={() => selectLocalRadio(station)}><b>{station}</b><span>{station === "Lo‑Fi Beats" ? "Оригинальный спокойный синтезированный фон" : station === "Вести посёлка" ? `Новости: ${locationName}, ${weather.toLowerCase()}` : station === "Пультовая волна" ? "Переговоры диспетчера и экипажей" : "Оригинальная музыкальная программа дороги"}</span></button>)}
+                  <section className="stream-radio">
+                    <div><b>Свой интернет-эфир</b><span>Прямая лицензированная HTTPS-ссылка на MP3, AAC или OGG</span></div>
+                    <input value={customRadioUrl} inputMode="url" placeholder="https://radio.example/stream.mp3" onChange={(event) => { customRadioUrlRef.current = event.target.value; setCustomRadioUrl(event.target.value); }} />
+                    <button onClick={() => startRadioStream()}>Включить эфир</button>
+                    <small>{radioStreamStatus}</small>
+                    <em>Используйте только поток, который разрешено воспроизводить в игре. При обрыве выполняются три попытки, затем включается офлайн-радио.</em>
+                  </section>
                   <button className="radio-toggle" onClick={() => { ensureAudio(); setRadioPlaying((value) => !value); }}>{radioPlaying ? "Поставить на паузу" : "Продолжить воспроизведение"}</button>
                 </div>
               )}

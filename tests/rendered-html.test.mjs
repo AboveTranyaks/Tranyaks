@@ -321,3 +321,23 @@ test("adds district sidewalks, crossings, rest benches, and procedural audio", a
   assert.match(source, /"Вести посёлка", "Пультовая волна"/);
   assert.match(styles, /\.audio-settings-title/);
 });
+
+test("supports licensed custom radio streams with resilient offline fallback and vehicle audio", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /customRadioUrl\?: string/);
+  assert.match(source, /function startRadioStream/);
+  assert.match(source, /new Audio\(\)/);
+  assert.match(source, /Нужна прямая HTTPS-ссылка/);
+  assert.match(source, /attempt < 2/);
+  assert.match(source, /Поток недоступен · включено офлайн-радио/);
+  assert.match(source, /Используйте только поток, который разрешено воспроизводить в игре/);
+  assert.match(source, /vehicleEngine: OscillatorNode/);
+  assert.match(source, /activeAudio\.vehicleEngine\.frequency\.setTargetAtTime/);
+  assert.match(source, /playVehicleHorn/);
+  assert.match(source, /playAmbientDetail/);
+  assert.match(styles, /\.stream-radio/);
+});
