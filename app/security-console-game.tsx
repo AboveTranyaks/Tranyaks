@@ -2975,7 +2975,7 @@ export default function SecurityConsoleGame() {
     }
 
     const addHousePath = (x: number, z: number) => {
-      const district = nearestDistrict(x);
+      const district = nearestDistrictAt(x);
       const profile = SIDEWALK_PROFILES[district.id];
       const side = z >= 0 ? 1 : -1;
       const doorZ = z - side * 4.7;

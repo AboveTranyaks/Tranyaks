@@ -385,6 +385,8 @@ test("keeps residents facing the street and connects every house to a footpath",
   const source = await readFile(sourceUrl, "utf8");
 
   assert.match(source, /const addHousePath = \(x: number, z: number\)/);
+  assert.match(source, /const district = nearestDistrictAt\(x\)/);
+  assert.doesNotMatch(source, /\bnearestDistrict\(x\)/);
   assert.match(source, /addHousePath\(x, z\)/);
   assert.match(source, /const doorZ = z - side \* 4\.7/);
   assert.match(source, /npc\.rotation\.y = resident\.z > 0 \? Math\.PI : 0/);
