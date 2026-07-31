@@ -304,6 +304,7 @@ type TrafficVehicle = {
   laneZ: number;
   minX: number;
   maxX: number;
+  stoppedUntil: number;
 };
 
 type BusPassenger = {
@@ -521,6 +522,54 @@ const DEFAULT_FREIGHT_JOBS: FreightJob[] = [
   { id: "market", title: "Фермерский рейс", cargo: "Ящики с овощами", volume: 260, units: 5, unitWeight: 18, pickup: { label: "Ферма Динской", x: 4125, z: 142 }, delivery: { label: "Открытый рынок", x: 3970, z: -98 }, reward: 2100, deadlineHours: 6, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
   { id: "furniture", title: "Переезд Петровых", cargo: "Шкаф и домашняя мебель", volume: 380, units: 4, unitWeight: 22, pickup: { label: "Озёрная улица", x: 4080, z: -132 }, delivery: { label: "Новый дом", x: 1350, z: 116 }, reward: 2900, deadlineHours: 7, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
 ];
+
+const HOUSE_RESIDENT_NAMES = ["Анна", "Илья", "Нина", "Сергей", "Валентина", "Олег", "Ирина", "Борис", "Людмила", "Дмитрий", "Татьяна", "Евгений"];
+const HOUSE_RESIDENT_ARCHETYPES = ["Дружелюбный", "Скептик", "Занятой", "Осторожный", "Экономный", "Практичный"];
+const HOUSE_RESIDENT_NEEDS = ["безопасность семьи", "защита гаража", "спокойствие за дом", "защита автомобиля", "датчики дыма", "система без ложных тревог"];
+const HOUSE_RESIDENT_COLORS = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
+
+function createNeighbourhoodResidentSeeds(): Omit<Resident, "interest" | "signed">[] {
+  const centres = [0, 1350, 2700, 4000];
+  const quotas = [28, 25, 25, 25];
+  const columns = [-145, -116, -87, -58, -29, 0, 29, 58, 87, 116, 145];
+  const rows = [150, -150, 116, -116, 84, -84, 42, -42];
+  const occupied = RESIDENT_SEED.map((resident) => [resident.x, resident.z] as const);
+  const constructionAreas = [
+    { x: -112, z: 122, halfX: 27, halfZ: 23 },
+    { x: 3820, z: 132, halfX: 27, halfZ: 23 },
+  ];
+  const generated: Omit<Resident, "interest" | "signed">[] = [];
+  let id = RESIDENT_SEED.length + 1;
+  centres.forEach((centreX, districtIndex) => {
+    let added = 0;
+    for (const z of rows) {
+      for (const localX of columns) {
+        if (added >= quotas[districtIndex]) break;
+        const x = centreX + localX;
+        if (districtIndex === 0 && occupied.some(([houseX, houseZ]) => Math.hypot(x - houseX, z - houseZ) < 15)) continue;
+        if (constructionAreas.some((area) => Math.abs(x - area.x) < area.halfX + 7 && Math.abs(z - area.z) < area.halfZ + 7)) continue;
+        const index = generated.length;
+        generated.push({
+          id: id++,
+          name: `${HOUSE_RESIDENT_NAMES[index % HOUSE_RESIDENT_NAMES.length]} ${["Кузнецов", "Соколова", "Орлов", "Миронова", "Волков", "Белова"][index % 6]}`,
+          archetype: HOUSE_RESIDENT_ARCHETYPES[index % HOUSE_RESIDENT_ARCHETYPES.length],
+          address: `${["Садовая", "Новая", "Школьная", "Полевая"][index % 4]}, ${index + 11}`,
+          need: HOUSE_RESIDENT_NEEDS[index % HOUSE_RESIDENT_NEEDS.length],
+          hook: (["info", "empathy", "business"] as ReplyKind[])[index % 3],
+          greeting: "Здравствуйте. Если предложение подходит дому и семье, я готов(а) обсудить договор.",
+          x,
+          z,
+          color: HOUSE_RESIDENT_COLORS[index % HOUSE_RESIDENT_COLORS.length],
+        });
+        added += 1;
+      }
+      if (added >= quotas[districtIndex]) break;
+    }
+  });
+  return generated;
+}
+
+const ALL_RESIDENT_SEED = [...RESIDENT_SEED, ...createNeighbourhoodResidentSeeds()];
 const EMPTY_STAFF: StaffState = { dispatchers: 0, gbrCrews: 0, technicians: 0, salesManagers: 0, cleaners: 0 };
 const STAFF_ROLES = [
   { key: "dispatchers", name: "Диспетчер", salary: 8000, description: "Обрабатывает обычные тревоги." },
@@ -547,7 +596,7 @@ const QUESTS = [
     icon: "★",
     title: "Открыть своё дело",
     short: "Набрать первые договоры и арендовать центральный офис.",
-    full: "Алексей вернулся домой с 15 000 ₽ и без автомобиля. Чтобы запустить пульт, нужно убедить жителей доверить ему первые десять объектов и оформить офис.",
+    full: "Алексей вернулся домой без денег и без автомобиля. Чтобы запустить пульт, нужно заработать доверие жителей, заключить первые десять договоров и оформить офис.",
     reward: "5 000 ₽ · +20 репутации · режим пульта",
     target: { x: 92, z: -18, label: "Центральный офис" },
   },
@@ -981,7 +1030,7 @@ const RADIO_RECORD_STATIONS = [
 ] as const;
 
 const DEFAULT_SAVE: SaveData = {
-  money: 15000,
+  money: 0,
   reputation: 0,
   contracts: [],
   interests: {},
@@ -1021,7 +1070,7 @@ const DEFAULT_SAVE: SaveData = {
   audioMix: DEFAULT_AUDIO_MIX,
   customRadioUrl: "",
   careerRole: "manager",
-  inventory: [{ id: "leaflet", amount: 5 }],
+  inventory: [],
   trunkInventory: [],
   freightJobs: DEFAULT_FREIGHT_JOBS,
   completedFreightJobs: 0,
@@ -1232,7 +1281,7 @@ function readSave(): SaveData {
 }
 
 function residentsFromSave(save: SaveData): Resident[] {
-  return RESIDENT_SEED.map((resident) => ({
+  return ALL_RESIDENT_SEED.map((resident) => ({
     ...resident,
     interest: save.interests[resident.id] ?? 38 + ((resident.id * 7) % 13),
     signed: save.contracts.includes(resident.id),
@@ -1291,6 +1340,15 @@ function makeTree(scene: THREE.Object3D, x: number, z: number, scale = 1) {
   group.position.set(x, 0, z);
   group.rotation.y = (x * z) % 2;
   scene.add(group);
+}
+
+function makeBush(scene: THREE.Object3D, x: number, z: number, scale = 1) {
+  const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(0.78 * scale, 0), mat(0x4d9349));
+  bush.position.set(x, 0.62 * scale, z);
+  bush.scale.set(1.15, 0.82, 0.92);
+  bush.castShadow = true;
+  bush.receiveShadow = true;
+  scene.add(bush);
 }
 
 function makeFieldVegetation(scene: THREE.Object3D) {
@@ -2049,7 +2107,9 @@ export default function SecurityConsoleGame() {
   const [busReadyAtStop, setBusReadyAtStop] = useState(false);
   const [busRideStopIndex, setBusRideStopIndex] = useState<number | null>(null);
   const [busStopChoice, setBusStopChoice] = useState(false);
+  const [busStopRequested, setBusStopRequested] = useState(false);
   const busStopChoiceRef = useRef(false);
+  const busStopRequestedRef = useRef(false);
   const onBusRef = useRef(false);
   const busOriginStopRef = useRef(0);
   const busCurrentStopRef = useRef(0);
@@ -3207,44 +3267,11 @@ export default function SecurityConsoleGame() {
       box(scene, [5.1, 0.42, 0.28], [x - 3.95, 0.5, fenceZ], 0x806f55);
       box(scene, [5.1, 0.42, 0.28], [x + 3.95, 0.5, fenceZ], 0x806f55);
       addHousePath(x, z);
+      const gardenSide = z > 0 ? 1 : -1;
+      makeBush(scene, x - 4.6, z + gardenSide * 3.7, 0.72);
+      makeBush(scene, x + 4.4, z + gardenSide * 2.9, 0.58);
+      if (i % 3 === 0) makeTree(scene, x + (i % 2 === 0 ? -7.5 : 7.5), z + gardenSide * 6.8, 0.54);
     });
-
-    const houseColors = [0xe1b47d, 0xd89073, 0xd6c98a, 0x8eaf9a, 0xc7a3a3, 0x9bb8c2];
-    const constructionAreas = [
-      { x: -112, z: 122, halfX: 27, halfZ: 23 },
-      { x: 3820, z: 132, halfX: 27, halfZ: 23 },
-    ];
-    const addNeighbourhood = (centreX: number, count: number, startIndex: number) => {
-      const candidates: [number, number][] = [];
-      const columns = [-145, -116, -87, -58, -29, 0, 29, 58, 87, 116, 145];
-      const rows = [150, -150, 116, -116, 84, -84, 42, -42];
-      for (const z of rows) {
-        for (const localX of columns) candidates.push([centreX + localX, z]);
-      }
-      let added = 0;
-      for (const [x, z] of candidates) {
-        if (added >= count) break;
-        const overlapsLead = houses.some(([hx, hz]) => Math.hypot(x - hx, z - hz) < 15);
-        const overlapsConstruction = constructionAreas.some((area) =>
-          Math.abs(x - area.x) < area.halfX + 7 && Math.abs(z - area.z) < area.halfZ + 7,
-        );
-        if (centreX === 0 && overlapsLead) continue;
-        if (overlapsConstruction) continue;
-        const house = makeHouse(scene, x, z, houseColors[(startIndex + added) % houseColors.length], false);
-        house.traverse((part) => {
-          if (part instanceof THREE.Mesh && part.name === "window" && part.material instanceof THREE.MeshStandardMaterial) {
-            windowMaterials.push(part.material);
-          }
-        });
-        engine.colliders.push({ x, z, halfX: 5.4, halfZ: 4.9, kind: "house" });
-        addHousePath(x, z);
-        added += 1;
-      }
-    };
-    addNeighbourhood(0, 28, 10);
-    addNeighbourhood(1350, 25, 25);
-    addNeighbourhood(2700, 25, 50);
-    addNeighbourhood(4000, 25, 75);
 
     const addConstructionSite = (
       title: string,
@@ -4002,6 +4029,7 @@ export default function SecurityConsoleGame() {
         laneZ,
         minX: -170,
         maxX: 4170,
+        stoppedUntil: 0,
       });
     }
 
@@ -4154,6 +4182,16 @@ export default function SecurityConsoleGame() {
         document.querySelector<HTMLButtonElement>(".bus-board-button:not(:disabled)")?.click();
         return;
       }
+      if (e.code === "KeyR" && modeRef.current === "busRide" && !e.repeat) {
+        busStopRequestedRef.current = true;
+        setBusStopRequested(true);
+        flash("Остановка запрошена · автобус остановится на ближайшем павильоне");
+        return;
+      }
+      if (e.code === "KeyE" && modeRef.current === "busRide" && busStopChoiceRef.current && !e.repeat) {
+        document.querySelector<HTMLButtonElement>(".bus-exit-button")?.click();
+        return;
+      }
       if (e.code === "KeyE" && modeRef.current === "world" && !e.repeat) {
         const focus = engine.driving ? engine.car : engine.player;
         if (!focus) return;
@@ -4303,7 +4341,8 @@ export default function SecurityConsoleGame() {
     };
     const onMouseUp = () => (mouseDown = false);
     const onWheel = (e: WheelEvent) => {
-      engine.zoom = clamp(engine.zoom + e.deltaY * 0.01, 8, engine.driving ? 24 : 19);
+      const ridingBus = modeRef.current === "busRide";
+      engine.zoom = clamp(engine.zoom + e.deltaY * 0.01, ridingBus ? 3.6 : 8, ridingBus ? 14.3 : engine.driving ? 24 : 19);
     };
     const onContextMenu = (e: Event) => e.preventDefault();
     const onResize = () => {
@@ -4915,7 +4954,19 @@ export default function SecurityConsoleGame() {
           !engine.driving &&
           isPedestrianCrossing(player.position.x, player.position.z) &&
           Math.abs(trafficVehicle.mesh.position.x - player.position.x) < 24;
-        const trafficSpeed = trafficVehicle.speed * (yieldingAtCrossing ? 0.12 : 1);
+        const trafficX = trafficVehicle.mesh.position.x;
+        const isObstacleAhead = (x: number, z: number, halfWidth: number, clearance: number) => {
+          const forwardDistance = (x - trafficX) * trafficVehicle.direction;
+          return forwardDistance > 0.15 && forwardDistance < clearance && Math.abs(z - trafficVehicle.laneZ) < halfWidth;
+        };
+        const playerBlocksLane = !engine.driving && isObstacleAhead(player.position.x, player.position.z, 3.1, 8.5);
+        const ownCarBlocksLane = engine.driving && car.visible && isObstacleAhead(car.position.x, car.position.z, 3.25, 9.5);
+        const busBlocksLane = bus.visible && isObstacleAhead(bus.position.x, bus.position.z, 3.8, 12);
+        const trafficBlocksLane = engine.traffic.some((other) => other !== trafficVehicle && isObstacleAhead(other.mesh.position.x, other.mesh.position.z, 2.8, 8));
+        const staticBlocksLane = engine.colliders.some((collider) => isObstacleAhead(collider.x, collider.z, collider.halfZ + 2.4, collider.halfX + 4));
+        const blockedByDynamicObject = playerBlocksLane || ownCarBlocksLane || busBlocksLane || trafficBlocksLane || staticBlocksLane;
+        if (blockedByDynamicObject || yieldingAtCrossing) trafficVehicle.stoppedUntil = Math.max(trafficVehicle.stoppedUntil, now + 260);
+        const trafficSpeed = now < trafficVehicle.stoppedUntil ? 0 : trafficVehicle.speed;
         trafficVehicle.mesh.position.x += trafficVehicle.direction * trafficSpeed * dt;
         if (trafficVehicle.mesh.position.x > trafficVehicle.maxX) trafficVehicle.mesh.position.x = trafficVehicle.minX;
         if (trafficVehicle.mesh.position.x < trafficVehicle.minX) trafficVehicle.mesh.position.x = trafficVehicle.maxX;
@@ -4978,6 +5029,8 @@ export default function SecurityConsoleGame() {
               setBusRideStopIndex(busCurrentStop);
               busStopChoiceRef.current = true;
               setBusStopChoice(true);
+              busStopRequestedRef.current = false;
+              setBusStopRequested(false);
             }
           } else {
             bus.position.x += Math.sign(remaining) * busSpeed * dt;
@@ -5052,7 +5105,7 @@ export default function SecurityConsoleGame() {
 
       const target = focus.position.clone();
       target.y += ridingBus ? 2.35 : engine.driving ? 2.2 : 3.0;
-      const distance = ridingBus ? Math.min(engine.zoom, 8.5) : engine.zoom + (engine.driving ? 4 : 0);
+      const distance = ridingBus ? clamp(engine.zoom * 0.42, 1.5, 6) : engine.zoom + (engine.driving ? 4 : 0);
       const cameraOffset = new THREE.Vector3(
         Math.sin(engine.yaw) * Math.cos(engine.pitch) * distance,
         Math.sin(engine.pitch) * distance + 2,
@@ -5795,15 +5848,14 @@ export default function SecurityConsoleGame() {
       flash("Подождите, пока автобус полностью остановится у павильона");
       return;
     }
-    if (moneyRef.current < 50) {
-      flash("Для поездки нужно минимум 50 ₽");
-      return;
-    }
+    if (moneyRef.current < 50) flash("Диспетчер оформил первую поездку в долг · оплатите её после первого заработка");
     onBusRef.current = true;
     busOriginStopRef.current = stopIndex;
     setBusRideStopIndex(stopIndex);
     busStopChoiceRef.current = false;
     setBusStopChoice(false);
+    busStopRequestedRef.current = false;
+    setBusStopRequested(false);
     engineRef.current.player.visible = false;
     engineRef.current.busRider.visible = true;
     setTransitMenu(null);
@@ -5825,7 +5877,8 @@ export default function SecurityConsoleGame() {
     if (!player || !rider || !stop) return;
     const travelledStops = Math.abs(stopIndex - busOriginStopRef.current);
     const fare = travelledStops >= 2 ? 150 : 50;
-    const nextMoney = Math.max(0, moneyRef.current - fare);
+    const paidFare = moneyRef.current >= fare;
+    const nextMoney = paidFare ? moneyRef.current - fare : moneyRef.current;
     moneyRef.current = nextMoney;
     setMoney(nextMoney);
     rider.visible = false;
@@ -5836,10 +5889,12 @@ export default function SecurityConsoleGame() {
     busStopChoiceRef.current = false;
     setBusStopChoice(false);
     setBusRideStopIndex(null);
+    busStopRequestedRef.current = false;
+    setBusStopRequested(false);
     setPlayerPos({ x: player.position.x, z: player.position.z });
     setMode("world");
     persist(residentsRef.current, nextMoney, reputation);
-    flash(`Вы вышли: ${stop.name} · проезд ${fare} ₽`);
+    flash(`Вы вышли: ${stop.name} · ${paidFare ? `проезд ${fare} ₽` : "первая поездка в долг"}`);
   };
 
   const buyStoreItem = (kind: "batteries" | "food" | "tools" | "book" | "leaflets" | "billboard" | "radio" | "catFood" | "dogFood" | "grain") => {
@@ -6481,7 +6536,7 @@ export default function SecurityConsoleGame() {
     }
     const cleanStart = migrateSave({
       ...DEFAULT_SAVE,
-      money: 15000,
+      money: 0,
       reputation: 0,
       contracts: [],
       interests: {},
@@ -6983,14 +7038,17 @@ export default function SecurityConsoleGame() {
           <span>
             {busStopChoice
               ? "Двери открыты. Можно выйти или остаться в салоне."
-              : "Смотрите маршрут на миникарте. Следующая остановка появится после фактического прибытия."}
+              : busStopRequested
+                ? "Остановка запрошена: автобус остановится на ближайшем павильоне."
+                : "Смотрите маршрут на миникарте. Колёсико меняет обзор в салоне, ПКМ поворачивает камеру."}
           </span>
           {busStopChoice && (
             <div>
-              <button onClick={exitBus}>Выйти здесь</button>
+              <button className="bus-exit-button" onClick={exitBus}>E · Выйти здесь</button>
               <button className="primary" onClick={continueBusRide}>Ехать дальше</button>
             </div>
           )}
+          {!busStopChoice && <button onClick={() => { busStopRequestedRef.current = true; setBusStopRequested(true); flash("Остановка запрошена"); }}>R · Остановить на следующей</button>}
         </section>
       )}
 
@@ -6999,7 +7057,7 @@ export default function SecurityConsoleGame() {
           <div className="intro-copy">
             <div className="eyebrow">● Играбельный low-poly прототип</div>
             <h1>Пульт <em>охраны</em></h1>
-            <p>Алексей приехал в Первореченское рейсовым автобусом — без личной машины, но с 15 000 ₽ и планом открыть охранное предприятие. Первые маршруты предстоит пройти пешком или проехать на автобусе №21.</p>
+            <p>Алексей приехал в Первореченское рейсовым автобусом — без личной машины и без денег, но с планом открыть охранное предприятие. Первые поручения помогут заработать на билет, транспорт и первые договоры.</p>
             <div className="intro-actions">
               <button className="primary-btn" onClick={() => startCareer("manager")}>Начать карьеру менеджера →</button>
               <button className="soft-btn carrier-career" onClick={() => startCareer("carrier")}>Начать карьеру перевозчика · УАЗ Профи</button>
