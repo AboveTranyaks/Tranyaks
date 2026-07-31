@@ -30,12 +30,22 @@ type FreightJob = {
   title: string;
   cargo: string;
   volume: number;
+  units: number;
+  unitWeight: number;
   pickup: { label: string; x: number; z: number };
   delivery: { label: string; x: number; z: number };
   reward: number;
   deadlineHours: number;
   status: FreightJobStatus;
   loaded: boolean;
+  loadedUnits: number;
+  deliveredUnits: number;
+};
+type CarriedFreightUnit = {
+  jobId: string;
+  label: string;
+  weight: number;
+  volume: number;
 };
 type WildlifeKind = "cat" | "dog" | "cow" | "goat" | "chicken" | "horse" | "hare" | "fox" | "hedgehog" | "bird" | "stork" | "butterfly";
 type WildlifeAgent = {
@@ -504,12 +514,12 @@ const INVENTORY_ITEMS: Record<InventoryItemId, { name: string; slots: number; we
   grain: { name: "Зерно для птиц", slots: 1, weight: 0.6, icon: "✦" },
 };
 const DEFAULT_FREIGHT_JOBS: FreightJob[] = [
-  { id: "fresh-food", title: "Свежие продукты", cargo: "Овощи и молочная продукция", volume: 180, pickup: { label: "Продуктовая база", x: 3650, z: 112 }, delivery: { label: "Супермаркет «Динской»", x: 3995, z: -24 }, reward: 1400, deadlineHours: 4, status: "available", loaded: false },
-  { id: "electronics", title: "Камеры для магазина", cargo: "Камеры, датчики и провода", volume: 120, pickup: { label: "Склад «Спектр»", x: 3710, z: 112 }, delivery: { label: "Магазин электроники", x: 4058, z: 44 }, reward: 1700, deadlineHours: 5, status: "available", loaded: false },
-  { id: "building", title: "Стройка века", cargo: "3 паллеты кирпича, 2 цемента и 1 арматура", volume: 600, pickup: { label: "Склад хозтоваров", x: 3680, z: 145 }, delivery: { label: "Стройка в Первореченском", x: -112, z: 122 }, reward: 5000, deadlineHours: 8, status: "available", loaded: false },
-  { id: "urgent-generator", title: "Срочный рейс", cargo: "Генератор и кабель", volume: 340, pickup: { label: "Грузовой сервис", x: 3598, z: 146 }, delivery: { label: "Стройплощадка Динской", x: 3820, z: 132 }, reward: 4200, deadlineHours: 3, status: "available", loaded: false },
-  { id: "market", title: "Фермерский рейс", cargo: "Ящики с овощами", volume: 260, pickup: { label: "Ферма Динской", x: 4125, z: 142 }, delivery: { label: "Открытый рынок", x: 3970, z: -98 }, reward: 2100, deadlineHours: 6, status: "available", loaded: false },
-  { id: "furniture", title: "Переезд Петровых", cargo: "Шкаф и домашняя мебель", volume: 380, pickup: { label: "Озёрная улица", x: 4080, z: -132 }, delivery: { label: "Новый дом", x: 1350, z: 116 }, reward: 2900, deadlineHours: 7, status: "available", loaded: false },
+  { id: "fresh-food", title: "Свежие продукты", cargo: "Овощи и молочная продукция", volume: 180, units: 5, unitWeight: 16, pickup: { label: "Продуктовая база", x: 3650, z: 112 }, delivery: { label: "Супермаркет «Динской»", x: 3995, z: -24 }, reward: 1400, deadlineHours: 4, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
+  { id: "electronics", title: "Камеры для магазина", cargo: "Камеры, датчики и провода", volume: 120, units: 4, unitWeight: 12, pickup: { label: "Склад «Спектр»", x: 3710, z: 112 }, delivery: { label: "Магазин электроники", x: 4058, z: 44 }, reward: 1700, deadlineHours: 5, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
+  { id: "building", title: "Стройка века", cargo: "3 паллеты кирпича, 2 цемента и 1 арматура", volume: 600, units: 6, unitWeight: 20, pickup: { label: "Склад хозтоваров", x: 3680, z: 145 }, delivery: { label: "Стройка в Первореченском", x: -112, z: 122 }, reward: 5000, deadlineHours: 8, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
+  { id: "urgent-generator", title: "Срочный рейс", cargo: "Генератор и кабель", volume: 340, units: 3, unitWeight: 24, pickup: { label: "Грузовой сервис", x: 3598, z: 146 }, delivery: { label: "Стройплощадка Динской", x: 3820, z: 132 }, reward: 4200, deadlineHours: 3, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
+  { id: "market", title: "Фермерский рейс", cargo: "Ящики с овощами", volume: 260, units: 5, unitWeight: 18, pickup: { label: "Ферма Динской", x: 4125, z: 142 }, delivery: { label: "Открытый рынок", x: 3970, z: -98 }, reward: 2100, deadlineHours: 6, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
+  { id: "furniture", title: "Переезд Петровых", cargo: "Шкаф и домашняя мебель", volume: 380, units: 4, unitWeight: 22, pickup: { label: "Озёрная улица", x: 4080, z: -132 }, delivery: { label: "Новый дом", x: 1350, z: 116 }, reward: 2900, deadlineHours: 7, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
 ];
 const EMPTY_STAFF: StaffState = { dispatchers: 0, gbrCrews: 0, technicians: 0, salesManagers: 0, cleaners: 0 };
 const STAFF_ROLES = [
@@ -855,6 +865,120 @@ const ACHIEVEMENTS = [
 
 const LEADERBOARD_SEED: { rank: number; playerName: string; avatar: AvatarId; value: number; trend: "up" | "same" | "down" }[] = [];
 const FUEL_TANK_LITERS = 40;
+const RADIO_RECORD_STATIONS = [
+  ["Record", "https://radiorecord.hostingradio.ru/rr_main96.aacp"],
+  ["Russian Mix", "https://radiorecord.hostingradio.ru/rus96.aacp"],
+  ["Summer Dance от Т-Банк", "https://radiorecord.hostingradio.ru/summerparty96.aacp"],
+  ["Супердискотека 90-х", "https://radiorecord.hostingradio.ru/sd9096.aacp"],
+  ["Beach Party", "https://radiorecord.hostingradio.ru/beach64.aacp"],
+  ["Russian Hits", "https://radiorecord.hostingradio.ru/russianhits64.aacp"],
+  ["Deep", "https://radiorecord.hostingradio.ru/deep96.aacp"],
+  ["Chill-Out", "https://radiorecord.hostingradio.ru/chil96.aacp"],
+  ["На шашлыки!", "https://radiorecord.hostingradio.ru/nashashlyki96.aacp"],
+  ["Megamix", "https://radiorecord.hostingradio.ru/mix96.aacp"],
+  ["Rock", "https://radiorecord.hostingradio.ru/rock96.aacp"],
+  ["Remix", "https://radiorecord.hostingradio.ru/rmx96.aacp"],
+  ["Гоп FM", "https://radiorecord.hostingradio.ru/gop96.aacp"],
+  ["Chill House", "https://radiorecord.hostingradio.ru/chillhouse96.aacp"],
+  ["Big Hits", "https://radiorecord.hostingradio.ru/bighits96.aacp"],
+  ["Рекорд 00-х", "https://radiorecord.hostingradio.ru/200096.aacp"],
+  ["Record 80-х", "https://radiorecord.hostingradio.ru/198096.aacp"],
+  ["Нафталин FM", "https://radiorecord.hostingradio.ru/naft96.aacp"],
+  ["Маятник Фуко", "https://radiorecord.hostingradio.ru/mf96.aacp"],
+  ["Trancemission", "https://radiorecord.hostingradio.ru/tm96.aacp"],
+  ["Russian Gold", "https://radiorecord.hostingradio.ru/russiangold96.aacp"],
+  ["Pirate Station", "https://radiorecord.hostingradio.ru/ps96.aacp"],
+  ["Innocence", "https://radiorecord.hostingradio.ru/ibiza96.aacp"],
+  ["Медляк FM", "https://radiorecord.hostingradio.ru/mdl96.aacp"],
+  ["Party 24/7", "https://radiorecord.hostingradio.ru/party96.aacp"],
+  ["Phonk", "https://radiorecord.hostingradio.ru/phonk96.aacp"],
+  ["Record Gold", "https://radiorecord.hostingradio.ru/gold96.aacp"],
+  ["Руки Вверх!", "https://radiorecord.hostingradio.ru/rv96.aacp"],
+  ["На Хайпе", "https://radiorecord.hostingradio.ru/hype96.aacp"],
+  ["Rap Hits", "https://radiorecord.hostingradio.ru/rap96.aacp"],
+  ["Rap Classics", "https://radiorecord.hostingradio.ru/rapclassics96.aacp"],
+  ["Trance Classics", "https://radiorecord.hostingradio.ru/trancehits96.aacp"],
+  ["Колбасный Цех", "https://radiorecord.hostingradio.ru/pump96.aacp"],
+  ["D'n'B Classics", "https://radiorecord.hostingradio.ru/drumhits96.aacp"],
+  ["Armin van Buuren", "https://radiorecord.hostingradio.ru/armin96.aacp"],
+  ["Summer Lounge", "https://radiorecord.hostingradio.ru/summerlounge64.aacp"],
+  ["Organic", "https://radiorecord.hostingradio.ru/organic96.aacp"],
+  ["Ultra Music Festival", "https://radiorecord.hostingradio.ru/ultra64.aacp"],
+  ["VIP House", "https://radiorecord.hostingradio.ru/vip96.aacp"],
+  ["Breaks", "https://radiorecord.hostingradio.ru/brks96.aacp"],
+  ["Liquid Funk", "https://radiorecord.hostingradio.ru/liquidfunk96.aacp"],
+  ["Workout", "https://radiorecord.hostingradio.ru/workout96.aacp"],
+  ["EDM", "https://radiorecord.hostingradio.ru/club96.aacp"],
+  ["Bass House", "https://radiorecord.hostingradio.ru/jackin96.aacp"],
+  ["GOA/PSY", "https://radiorecord.hostingradio.ru/goa96.aacp"],
+  ["10's Dance", "https://radiorecord.hostingradio.ru/201096.aacp"],
+  ["Trancehouse", "https://radiorecord.hostingradio.ru/trancehouse96.aacp"],
+  ["Black Rap", "https://radiorecord.hostingradio.ru/yo96.aacp"],
+  ["Techno", "https://radiorecord.hostingradio.ru/techno96.aacp"],
+  ["Tropical", "https://radiorecord.hostingradio.ru/trop96.aacp"],
+  ["Lo-Fi", "https://radiorecord.hostingradio.ru/lofi96.aacp"],
+  ["Tech House", "https://radiorecord.hostingradio.ru/techouse96.aacp"],
+  ["Trap", "https://radiorecord.hostingradio.ru/trap96.aacp"],
+  ["Technopop", "https://radiorecord.hostingradio.ru/technopop96.aacp"],
+  ["70's Dance", "https://radiorecord.hostingradio.ru/197096.aacp"],
+  ["Dream Dance", "https://radiorecord.hostingradio.ru/dream96.aacp"],
+  ["Neurofunk", "https://radiorecord.hostingradio.ru/neurofunk96.aacp"],
+  ["Ambient", "https://radiorecord.hostingradio.ru/ambient96.aacp"],
+  ["Record Classix", "https://radiorecord.hostingradio.ru/classix64.aacp"],
+  ["Record Club Show", "https://radiorecord.hostingradio.ru/clubshow64.aacp"],
+  ["Eurodance", "https://radiorecord.hostingradio.ru/eurodance96.aacp"],
+  ["Lo-Fi House", "https://radiorecord.hostingradio.ru/lofihouse64.aacp"],
+  ["House Hits", "https://radiorecord.hostingradio.ru/househits96.aacp"],
+  ["Uplifting", "https://radiorecord.hostingradio.ru/uplift96.aacp"],
+  ["Feel", "https://radiorecord.hostingradio.ru/feel64.aacp"],
+  ["Tiesto", "https://radiorecord.hostingradio.ru/tiesto96.aacp"],
+  ["A State of Trance", "https://radiorecord.hostingradio.ru/asot64.aacp"],
+  ["Веснушка FM", "https://radiorecord.hostingradio.ru/deti96.aacp"],
+  ["Симфония FM", "https://radiorecord.hostingradio.ru/symph96.aacp"],
+  ["Minimal/Tech", "https://radiorecord.hostingradio.ru/mini96.aacp"],
+  ["TOP 100 EDM", "https://radiorecord.hostingradio.ru/top100edm96.aacp"],
+  ["Dream Pop", "https://radiorecord.hostingradio.ru/dreampop96.aacp"],
+  ["House Classics", "https://radiorecord.hostingradio.ru/houseclss96.aacp"],
+  ["David Guetta", "https://radiorecord.hostingradio.ru/guetta96.aacp"],
+  ["DJ Цветкоff", "https://radiorecord.hostingradio.ru/tsvetkov64.aacp"],
+  ["Disco/Funk", "https://radiorecord.hostingradio.ru/discofunk96.aacp"],
+  ["Hard Bass", "https://radiorecord.hostingradio.ru/hbass96.aacp"],
+  ["Afro House", "https://radiorecord.hostingradio.ru/afro64.aacp"],
+  ["Rave FM", "https://radiorecord.hostingradio.ru/rave96.aacp"],
+  ["Nu Dance", "https://radiorecord.hostingradio.ru/nudance64.aacp"],
+  ["60's Dance", "https://radiorecord.hostingradio.ru/cadillac96.aacp"],
+  ["Lady Waks", "https://radiorecord.hostingradio.ru/ladywaks64.aacp"],
+  ["Dancecore", "https://radiorecord.hostingradio.ru/dc96.aacp"],
+  ["Future House", "https://radiorecord.hostingradio.ru/fut96.aacp"],
+  ["Darkside", "https://radiorecord.hostingradio.ru/darkside96.aacp"],
+  ["Future Rave", "https://radiorecord.hostingradio.ru/futurerave96.aacp"],
+  ["Reggae", "https://radiorecord.hostingradio.ru/reggae96.aacp"],
+  ["Electro", "https://radiorecord.hostingradio.ru/elect96.aacp"],
+  ["Hardstyle", "https://radiorecord.hostingradio.ru/teo96.aacp"],
+  ["Dubstep", "https://radiorecord.hostingradio.ru/dub96.aacp"],
+  ["Progressive", "https://radiorecord.hostingradio.ru/progr96.aacp"],
+  ["Nejtrino & Baur", "https://radiorecord.hostingradio.ru/nejtrinobaur64.aacp"],
+  ["Synthwave", "https://radiorecord.hostingradio.ru/synth96.aacp"],
+  ["Latina Dance", "https://radiorecord.hostingradio.ru/latina96.aacp"],
+  ["DJ Gvozd", "https://radiorecord.hostingradio.ru/djgvozd64.aacp"],
+  ["EDM Classics", "https://radiorecord.hostingradio.ru/edmhits96.aacp"],
+  ["Tecktonik", "https://radiorecord.hostingradio.ru/tecktonik96.aacp"],
+  ["Jungle", "https://radiorecord.hostingradio.ru/jungle96.aacp"],
+  ["Hypnotic", "https://radiorecord.hostingradio.ru/hypno96.aacp"],
+  ["UK Garage", "https://radiorecord.hostingradio.ru/ukgarage96.aacp"],
+  ["Гастарбайтер FM", "https://radiorecord.hostingradio.ru/gast96.aacp"],
+  ["Midtempo", "https://radiorecord.hostingradio.ru/mt96.aacp"],
+  ["Future Bass", "https://radiorecord.hostingradio.ru/fbass96.aacp"],
+  ["Martin Garrix", "https://radiorecord.hostingradio.ru/martingarrix64.aacp"],
+  ["Live DJ-sets", "https://radiorecord.hostingradio.ru/livedjsets96.aacp"],
+  ["Русская Зима", "https://radiorecord.hostingradio.ru/ruszima96.aacp"],
+  ["Oliver Heldens", "https://radiorecord.hostingradio.ru/oliverheldens64.aacp"],
+  ["Moombahton", "https://radiorecord.hostingradio.ru/mmbt96.aacp"],
+  ["2-step", "https://radiorecord.hostingradio.ru/2step96.aacp"],
+  ["Complextro", "https://radiorecord.hostingradio.ru/complextro96.aacp"],
+  ["Groove/Tribal", "https://radiorecord.hostingradio.ru/groovetribal96.aacp"],
+  ["Christmas Chill", "https://radiorecord.hostingradio.ru/christmaschill96.aacp"],
+] as const;
 
 const DEFAULT_SAVE: SaveData = {
   money: 15000,
@@ -963,7 +1087,21 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
     careerRole: value?.careerRole === "carrier" ? "carrier" : "manager",
     inventory: Array.isArray(value?.inventory) ? value.inventory.filter((stack) => Boolean(INVENTORY_ITEMS[stack.id]) && stack.amount > 0).slice(0, 20) : [{ id: "leaflet", amount: 5 }],
     trunkInventory: Array.isArray(value?.trunkInventory) ? value.trunkInventory.filter((stack) => Boolean(INVENTORY_ITEMS[stack.id]) && stack.amount > 0).slice(0, 40) : [],
-    freightJobs: Array.isArray(value?.freightJobs) ? value.freightJobs : DEFAULT_FREIGHT_JOBS,
+    freightJobs: (Array.isArray(value?.freightJobs) ? value.freightJobs : DEFAULT_FREIGHT_JOBS).map((job) => {
+      const defaults = DEFAULT_FREIGHT_JOBS.find((item) => item.id === job.id) ?? DEFAULT_FREIGHT_JOBS[0];
+      const units = Math.max(1, job.units ?? defaults.units);
+      const loadedUnits = clamp(job.loadedUnits ?? (job.loaded ? units : 0), 0, units);
+      const deliveredUnits = clamp(job.deliveredUnits ?? (job.status === "completed" ? units : 0), 0, units);
+      return {
+        ...defaults,
+        ...job,
+        units,
+        unitWeight: Math.max(1, job.unitWeight ?? defaults.unitWeight),
+        loaded: Boolean(job.loaded || loadedUnits >= units),
+        loadedUnits,
+        deliveredUnits,
+      };
+    }),
     completedFreightJobs: Math.max(0, value?.completedFreightJobs ?? 0),
     carFuel: value?.carFuel === undefined ? (ownedVehicles.length > 0 ? 20 : 0) : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
@@ -1815,6 +1953,10 @@ export default function SecurityConsoleGame() {
   const engineRef = useRef<{
     player?: THREE.Group;
     car?: THREE.Group;
+    freightTrolley?: THREE.Group;
+    freightTrolleyCargo?: THREE.Mesh[];
+    freightVehicleCargo?: THREE.Mesh[];
+    carriedFreightMesh?: THREE.Mesh;
     bus?: THREE.Group;
     busRider?: THREE.Group;
     scene?: THREE.Scene;
@@ -1979,6 +2121,15 @@ export default function SecurityConsoleGame() {
   const freightJobsRef = useRef(freightJobs);
   const [completedFreightJobs, setCompletedFreightJobs] = useState(initialSave.completedFreightJobs ?? 0);
   const completedFreightJobsRef = useRef(completedFreightJobs);
+  const [carriedFreight, setCarriedFreight] = useState<CarriedFreightUnit | null>(null);
+  const carriedFreightRef = useRef<CarriedFreightUnit | null>(null);
+  const [trolleyCargoUnits, setTrolleyCargoUnits] = useState(0);
+  const trolleyCargoUnitsRef = useRef(0);
+  const [usingFreightTrolley, setUsingFreightTrolley] = useState(false);
+  const usingFreightTrolleyRef = useRef(false);
+  const [freightContextHint, setFreightContextHint] = useState("");
+  const [freightServiceStatus, setFreightServiceStatus] = useState("");
+  const freightInteractionRef = useRef<() => boolean>(() => false);
   const [rentalActive, setRentalActive] = useState(false);
   const [loan, setLoan] = useState<LoanState>(initialSave.loan ?? null);
   const loanRef = useRef(loan);
@@ -2055,6 +2206,7 @@ export default function SecurityConsoleGame() {
   const [radioMode, setRadioMode] = useState<"local" | "stream">("local");
   const [customRadioUrl, setCustomRadioUrl] = useState(initialSave.customRadioUrl ?? "");
   const customRadioUrlRef = useRef(customRadioUrl);
+  const [recordStationUrl, setRecordStationUrl] = useState<string>(RADIO_RECORD_STATIONS[0][1]);
   const [radioStreamStatus, setRadioStreamStatus] = useState("Офлайн-радио готово");
   const radioStreamRef = useRef<HTMLAudioElement | null>(null);
   const radioReconnectTimerRef = useRef<number | null>(null);
@@ -2073,7 +2225,14 @@ export default function SecurityConsoleGame() {
     completedFreightJobsRef.current = completedFreightJobs;
   }, [careerRole, completedFreightJobs, freightJobs, inventory, trunkInventory]);
 
+  useEffect(() => {
+    carriedFreightRef.current = carriedFreight;
+    trolleyCargoUnitsRef.current = trolleyCargoUnits;
+    usingFreightTrolleyRef.current = usingFreightTrolley;
+  }, [carriedFreight, trolleyCargoUnits, usingFreightTrolley]);
+
   const signedCount = residents.filter((r) => r.signed).length;
+  const selectedRecordStation = RADIO_RECORD_STATIONS.find((station) => station[1] === recordStationUrl) ?? RADIO_RECORD_STATIONS[0];
   const totalContracts = signedCount + extendedContracts.length;
   const incomeMultiplier = dailyChallenges.streakCount >= 30 ? 1.05 : 1;
   const monthlyIncome = Math.round((
@@ -3580,6 +3739,93 @@ export default function SecurityConsoleGame() {
     engine.fuel = initialSave.carFuel ?? 0;
     engine.wear = initialSave.carWear ?? 0;
 
+    const carriedFreightMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(1.45, 1.15, 1.05),
+      mat(0xb8844f),
+    );
+    carriedFreightMesh.name = "carriedFreight";
+    carriedFreightMesh.position.set(0, 2.5, 0.92);
+    carriedFreightMesh.visible = false;
+    player.add(carriedFreightMesh);
+    engine.carriedFreightMesh = carriedFreightMesh;
+
+    const freightVehicleCargo: THREE.Mesh[] = [];
+    for (let index = 0; index < 6; index++) {
+      const cargo = new THREE.Mesh(
+        new THREE.BoxGeometry(1.15, 0.82, 1.05),
+        mat(index % 2 === 0 ? 0xb8844f : 0x9d7044),
+      );
+      cargo.name = `freightVehicleCargo${index}`;
+      cargo.position.set((index % 2 === 0 ? -0.68 : 0.68), 1.85 + Math.floor(index / 4) * 0.84, -1.9 + Math.floor(index / 2) * 0.92);
+      cargo.visible = false;
+      car.add(cargo);
+      freightVehicleCargo.push(cargo);
+    }
+    engine.freightVehicleCargo = freightVehicleCargo;
+
+    const freightTrolley = new THREE.Group();
+    freightTrolley.name = "freightTrolley";
+    const trolleyDeck = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.24, 1.65), mat(0xc9a34f));
+    trolleyDeck.position.y = 0.52;
+    const trolleyHandle = new THREE.Mesh(new THREE.BoxGeometry(2.15, 1.55, 0.16), mat(0x4f5c57));
+    trolleyHandle.position.set(0, 1.2, -0.82);
+    for (const x of [-0.82, 0.82]) {
+      for (const z of [-0.58, 0.58]) {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.16, 8), mat(0x2f3834));
+        wheel.position.set(x, 0.22, z);
+        wheel.rotation.z = Math.PI / 2;
+        freightTrolley.add(wheel);
+      }
+    }
+    freightTrolley.add(trolleyDeck, trolleyHandle);
+    const freightTrolleyCargo: THREE.Mesh[] = [];
+    for (let index = 0; index < 5; index++) {
+      const cargo = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.62, 0.72), mat(0xad7847));
+      cargo.position.set((index % 2 === 0 ? -0.48 : 0.48), 0.95 + Math.floor(index / 4) * 0.62, -0.3 + Math.floor(index / 2) * 0.6);
+      cargo.visible = false;
+      freightTrolley.add(cargo);
+      freightTrolleyCargo.push(cargo);
+    }
+    freightTrolley.position.set(DEFAULT_FREIGHT_JOBS[0].pickup.x + 3.5, 0, DEFAULT_FREIGHT_JOBS[0].pickup.z + 2.5);
+    freightTrolley.visible = false;
+    scene.add(freightTrolley);
+    engine.freightTrolley = freightTrolley;
+    engine.freightTrolleyCargo = freightTrolleyCargo;
+
+    const freightPointGroups = new Map<string, { pickup: THREE.Group; delivery: THREE.Group }>();
+    freightJobsRef.current.forEach((job) => {
+      const pickup = new THREE.Group();
+      const pickupPad = new THREE.Mesh(new THREE.BoxGeometry(8.5, 0.08, 7), mat(0xd8a246));
+      pickupPad.position.y = 0.12;
+      pickup.add(pickupPad);
+      for (let index = 0; index < Math.min(job.units, 6); index++) {
+        const cargo = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.9, 1.05), mat(index % 2 ? 0xa16d43 : 0xb8844f));
+        cargo.position.set(-2.1 + (index % 3) * 2.1, 0.62 + Math.floor(index / 3) * 0.9, 0.25);
+        cargo.castShadow = true;
+        pickup.add(cargo);
+      }
+      const pickupSign = makeReadableTextSign(makeTextBoard("ПОГРУЗКА", 480, 110, "#f5dfab", "#3e4b43"), 5.5, 1.25);
+      pickupSign.position.set(0, 2.6, -3.35);
+      pickup.add(pickupSign);
+      pickup.position.set(job.pickup.x, 0, job.pickup.z);
+      pickup.visible = false;
+      scene.add(pickup);
+
+      const delivery = new THREE.Group();
+      const deliveryPad = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 0.1, 24), mat(0x71b774));
+      deliveryPad.position.y = 0.12;
+      const deliveryRing = new THREE.Mesh(new THREE.TorusGeometry(3.25, 0.18, 6, 24), mat(0xe8f0c7));
+      deliveryRing.rotation.x = Math.PI / 2;
+      deliveryRing.position.y = 0.22;
+      const deliverySign = makeReadableTextSign(makeTextBoard("РАЗГРУЗКА", 520, 110, "#dff1d6", "#315946"), 6, 1.25);
+      deliverySign.position.set(0, 2.6, -3.4);
+      delivery.add(deliveryPad, deliveryRing, deliverySign);
+      delivery.position.set(job.delivery.x, 0, job.delivery.z);
+      delivery.visible = false;
+      scene.add(delivery);
+      freightPointGroups.set(job.id, { pickup, delivery });
+    });
+
     residentsRef.current.forEach((resident) => {
       const npc = makePerson(resident.color);
       npc.position.set(resident.x + 5, 0, resident.z + (resident.z > 0 ? -5 : 5));
@@ -3911,6 +4157,7 @@ export default function SecurityConsoleGame() {
       if (e.code === "KeyE" && modeRef.current === "world" && !e.repeat) {
         const focus = engine.driving ? engine.car : engine.player;
         if (!focus) return;
+        if (!engine.driving && freightInteractionRef.current()) return;
         const closestStation = GAS_STATIONS.reduce((closest, station) =>
           Math.hypot(focus.position.x - station.x, focus.position.z - station.z) <
           Math.hypot(focus.position.x - closest.x, focus.position.z - closest.z)
@@ -3947,6 +4194,14 @@ export default function SecurityConsoleGame() {
           return;
         }
         if (!engine.driving && currentVehicleRef.current && engine.car?.visible && focus.position.distanceTo(engine.car.position) < 5.2) {
+          if (carriedFreightRef.current) {
+            flash("Сначала положите груз в кузов или на тележку");
+            return;
+          }
+          if (usingFreightTrolleyRef.current) {
+            flash("Сначала отпустите тележку");
+            return;
+          }
           engine.driving = true;
           engine.yaw = car.rotation.y + Math.PI;
           engine.cameraInputAt = performance.now();
@@ -4127,6 +4382,25 @@ export default function SecurityConsoleGame() {
       let currentMovement: MovementState = "Покой";
       let currentWalkSpeedKmh = 0;
       let currentWalkSurface: WalkSurfaceKind = pedestrianSurfaceAt(player.position.x, player.position.z).surface;
+      const activeFreightJob = freightJobsRef.current.find((job) => job.status === "active");
+      freightPointGroups.forEach((groups, jobId) => {
+        const active = activeFreightJob?.id === jobId;
+        groups.pickup.visible = Boolean(active && !activeFreightJob?.loaded);
+        groups.delivery.visible = Boolean(active && activeFreightJob?.loaded);
+      });
+      carriedFreightMesh.visible = Boolean(carriedFreightRef.current);
+      freightTrolley.visible = Boolean(activeFreightJob);
+      freightTrolleyCargo.forEach((cargo, index) => {
+        cargo.visible = index < trolleyCargoUnitsRef.current;
+      });
+      const cargoRemainingInVehicle = activeFreightJob
+        ? activeFreightJob.loaded
+          ? Math.max(0, activeFreightJob.units - activeFreightJob.deliveredUnits - (carriedFreightRef.current?.jobId === activeFreightJob.id ? 1 : 0))
+          : activeFreightJob.loadedUnits
+        : 0;
+      freightVehicleCargo.forEach((cargo, index) => {
+        cargo.visible = index < Math.ceil(cargoRemainingInVehicle / Math.max(1, (activeFreightJob?.units ?? 1) / freightVehicleCargo.length));
+      });
 
       if (canMove && engine.driving) {
         const activeVehicle = currentVehicleRef.current ? VEHICLE_BY_ID[currentVehicleRef.current] : VEHICLE_BY_ID.oka;
@@ -4230,8 +4504,14 @@ export default function SecurityConsoleGame() {
         const carVisual = car.getObjectByName("carVisual");
         if (carVisual) {
           carVisual.rotation.z = THREE.MathUtils.lerp(carVisual.rotation.z, -engine.carSteer * clamp(Math.abs(engine.carSpeed) / 25, 0, 1) * 0.13, 1 - Math.pow(0.01, dt));
-          carVisual.rotation.x = THREE.MathUtils.lerp(carVisual.rotation.x, -throttle * 0.035 + Math.sin(now * 0.016) * (surface === "Асфальт" ? 0.002 : 0.012), 1 - Math.pow(0.025, dt));
-          carVisual.position.y = Math.sin(now * 0.013) * (surface === "Асфальт" ? 0.008 : 0.055);
+          const suspensionPitch = surface === "Асфальт"
+            ? -throttle * 0.018
+            : -throttle * 0.028 + Math.sin(now * 0.008) * 0.006;
+          const suspensionTravel = surface === "Асфальт"
+            ? 0
+            : Math.sin(now * 0.007) * (surface === "Грунт" ? 0.018 : 0.028);
+          carVisual.rotation.x = THREE.MathUtils.lerp(carVisual.rotation.x, suspensionPitch, 1 - Math.pow(0.006, dt));
+          carVisual.position.y = THREE.MathUtils.lerp(carVisual.position.y, suspensionTravel, 1 - Math.pow(0.0015, dt));
         }
         car.traverse((part) => {
           if (part instanceof THREE.Mesh && (part.name === "frontWheel" || part.name === "rearWheel")) {
@@ -4257,8 +4537,10 @@ export default function SecurityConsoleGame() {
         const side = (engine.keys.has("right") ? 1 : 0) - (engine.keys.has("left") ? 1 : 0);
         const moving = Math.abs(forward) + Math.abs(side) > 0;
         const usingPhone = modeRef.current === "phone";
-        const jogging = moving && !usingPhone && engine.keys.has("sprint") && energyRef.current > 10;
-        const fastWalking = moving && !jogging && now < engine.fastWalkUntil;
+        const carryingCargo = Boolean(carriedFreightRef.current);
+        const pushingTrolley = usingFreightTrolleyRef.current;
+        const jogging = moving && !usingPhone && !carryingCargo && !pushingTrolley && engine.keys.has("sprint") && energyRef.current > 10;
+        const fastWalking = moving && !jogging && !carryingCargo && !pushingTrolley && now < engine.fastWalkUntil;
         currentMovement = jogging ? "Бег трусцой" : fastWalking ? "Быстрый шаг" : moving ? "Шаг" : "Покой";
         const outfit = OUTFIT_BY_ID[outfitRef.current];
         const pedestrianSurface = pedestrianSurfaceAt(player.position.x, player.position.z);
@@ -4272,7 +4554,8 @@ export default function SecurityConsoleGame() {
         const carriedWeight = inventoryRef.current.reduce((sum, stack) => sum + INVENTORY_ITEMS[stack.id].weight * stack.amount, 0);
         const overweightSpeed = clamp(1 - Math.max(0, carriedWeight - 10) * 0.05, 0.7, 1);
         const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.95;
-        const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed * overweightSpeed * (usingPhone ? 0.38 : 1);
+        const freightSpeed = carryingCargo ? 0.6 : pushingTrolley ? 0.52 : 1;
+        const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed * overweightSpeed * freightSpeed * (usingPhone ? 0.38 : 1);
         currentWalkSpeedKmh = moving ? speed * 3.6 : 0;
         if (moving) {
           const angle = engine.yaw;
@@ -4297,9 +4580,28 @@ export default function SecurityConsoleGame() {
           player.position.y = THREE.MathUtils.lerp(player.position.y, 0, dt * 10);
           energyRef.current = clamp(energyRef.current + dt * 5, 0, 100);
         }
+        if (pushingTrolley) {
+          const trolleyDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(player.quaternion);
+          const trolleyTarget = player.position.clone().addScaledVector(trolleyDirection, 1.8);
+          trolleyTarget.y = 0;
+          freightTrolley.position.lerp(trolleyTarget, 1 - Math.pow(0.0008, dt));
+          freightTrolley.rotation.y = player.rotation.y;
+        }
       }
       if (!engine.driving) {
         animateHero(player, currentMovement, now, energyRef.current < 20, modeRef.current === "tablet");
+        if (carriedFreightRef.current) {
+          const leftArm = player.getObjectByName("leftArm");
+          const rightArm = player.getObjectByName("rightArm");
+          if (leftArm) {
+            leftArm.rotation.x = -0.88;
+            leftArm.rotation.z = -0.34;
+          }
+          if (rightArm) {
+            rightArm.rotation.x = -0.88;
+            rightArm.rotation.z = 0.34;
+          }
+        }
         if (now < benchRestUntilRef.current && currentMovement === "Покой") {
           player.position.y = 0.5;
           const leftLeg = player.getObjectByName("leftLeg");
@@ -4769,6 +5071,29 @@ export default function SecurityConsoleGame() {
         setNearestWalker(engine.nearestWalker);
         setNearBench(Boolean(engine.nearestBench));
         setNearCar(Boolean(currentVehicleRef.current) && car.visible && !engine.driving && player.position.distanceTo(car.position) < 5.2);
+        let nextFreightHint = "";
+        if (activeFreightJob && !engine.driving) {
+          const nearFreightCar = player.position.distanceTo(car.position) < 5.2;
+          const carAtPickup = Math.hypot(car.position.x - activeFreightJob.pickup.x, car.position.z - activeFreightJob.pickup.z) < 28;
+          const carAtDelivery = Math.hypot(car.position.x - activeFreightJob.delivery.x, car.position.z - activeFreightJob.delivery.z) < 28;
+          const nearPickupCargo = Math.hypot(player.position.x - activeFreightJob.pickup.x, player.position.z - activeFreightJob.pickup.z) < 6.5;
+          const nearDeliveryPoint = Math.hypot(player.position.x - activeFreightJob.delivery.x, player.position.z - activeFreightJob.delivery.z) < 6.5;
+          const nearTrolley = player.position.distanceTo(freightTrolley.position) < 3.2;
+          if (carriedFreightRef.current) {
+            if (nearTrolley && trolleyCargoUnitsRef.current < 5) nextFreightHint = "E · положить груз на тележку";
+            else if (!activeFreightJob.loaded && nearFreightCar && carAtPickup) nextFreightHint = "E · положить груз в кузов";
+            else if (activeFreightJob.loaded && nearDeliveryPoint) nextFreightHint = "E · сдать груз получателю";
+          } else if (usingFreightTrolleyRef.current && nearFreightCar && carAtPickup && trolleyCargoUnitsRef.current > 0) {
+            nextFreightHint = "E · перегрузить коробку с тележки в кузов";
+          } else if (activeFreightJob.loaded && nearFreightCar && carAtDelivery && activeFreightJob.deliveredUnits < activeFreightJob.units) {
+            nextFreightHint = "E · достать груз из кузова";
+          } else if (!activeFreightJob.loaded && nearPickupCargo && carAtPickup && activeFreightJob.loadedUnits + trolleyCargoUnitsRef.current < activeFreightJob.units) {
+            nextFreightHint = `E · взять ${activeFreightJob.cargo.toLowerCase()} (${activeFreightJob.unitWeight} кг)`;
+          } else if (nearTrolley) {
+            nextFreightHint = usingFreightTrolleyRef.current ? "E · отпустить тележку" : "E · взять тележку";
+          }
+        }
+        setFreightContextHint(nextFreightHint);
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
         setCarPos({ x: car.position.x, z: car.position.z });
         setMovementState(currentMovement);
@@ -5834,42 +6159,198 @@ export default function SecurityConsoleGame() {
     );
     freightJobsRef.current = next;
     setFreightJobs(next);
+    carriedFreightRef.current = null;
+    trolleyCargoUnitsRef.current = 0;
+    usingFreightTrolleyRef.current = false;
+    setCarriedFreight(null);
+    setTrolleyCargoUnits(0);
+    setUsingFreightTrolley(false);
+    setFreightServiceStatus("");
+    if (engineRef.current.freightTrolley) {
+      engineRef.current.freightTrolley.position.set(job.pickup.x + 4.5, 0, job.pickup.z + 3);
+    }
     setMapWaypoint({ ...job.pickup, label: `Погрузка · ${job.pickup.label}` });
     setMode("world");
-    flash(`Заказ принят: ${job.title}. Следуйте к месту погрузки.`);
+    flash(`Заказ принят: ${job.title}. Припаркуйтесь в зоне и переносите груз клавишей E.`);
     persistRef.current();
   };
 
-  const processFreightJob = () => {
+  const updateFreightJob = (jobId: string, patch: Partial<FreightJob>) => {
+    const next = freightJobsRef.current.map((job) => job.id === jobId ? { ...job, ...patch } : job);
+    freightJobsRef.current = next;
+    setFreightJobs(next);
+  };
+
+  const completeFreightJob = (activeJob: FreightJob) => {
+    const nextMoney = moneyRef.current + activeJob.reward;
+    const nextCompleted = completedFreightJobsRef.current + 1;
+    const next = freightJobsRef.current.map((job) =>
+      job.id === activeJob.id
+        ? { ...job, status: "completed" as FreightJobStatus, loaded: true, loadedUnits: job.units, deliveredUnits: job.units }
+        : job,
+    );
+    moneyRef.current = nextMoney;
+    freightJobsRef.current = next;
+    completedFreightJobsRef.current = nextCompleted;
+    setMoney(nextMoney);
+    setFreightJobs(next);
+    setCompletedFreightJobs(nextCompleted);
+    setReputation((value) => Math.min(100, value + 3));
+    setMapWaypoint(null);
+    setFreightContextHint("");
+    setFreightServiceStatus("");
+    if (engineRef.current.freightTrolley) engineRef.current.freightTrolley.visible = false;
+    flash(`Груз доставлен вручную · +${activeJob.reward.toLocaleString("ru-RU")} ₽ · репутация +3`);
+    window.setTimeout(() => persistRef.current(), 0);
+  };
+
+  const handleFreightInteraction = () => {
+    const activeJob = freightJobsRef.current.find((job) => job.status === "active");
+    const player = engineRef.current.player;
+    const car = engineRef.current.car;
+    const trolley = engineRef.current.freightTrolley;
+    if (!activeJob || !player || !car || !trolley || !currentVehicleRef.current) return false;
+    const nearCar = player.position.distanceTo(car.position) < 5.2;
+    const nearTrolley = player.position.distanceTo(trolley.position) < 3.2;
+    const nearPickup = Math.hypot(player.position.x - activeJob.pickup.x, player.position.z - activeJob.pickup.z) < 6.5;
+    const nearDelivery = Math.hypot(player.position.x - activeJob.delivery.x, player.position.z - activeJob.delivery.z) < 6.5;
+    const carAtPickup = Math.hypot(car.position.x - activeJob.pickup.x, car.position.z - activeJob.pickup.z) < 28;
+    const carAtDelivery = Math.hypot(car.position.x - activeJob.delivery.x, car.position.z - activeJob.delivery.z) < 28;
+    const carried = carriedFreightRef.current;
+
+    if (carried) {
+      if (nearTrolley && trolleyCargoUnitsRef.current < 5 && !activeJob.loaded) {
+        const nextUnits = trolleyCargoUnitsRef.current + 1;
+        trolleyCargoUnitsRef.current = nextUnits;
+        carriedFreightRef.current = null;
+        setTrolleyCargoUnits(nextUnits);
+        setCarriedFreight(null);
+        flash(`Груз на тележке · ${nextUnits}/5 мест занято`);
+        return true;
+      }
+      if (!activeJob.loaded && nearCar && carAtPickup) {
+        const loadedUnits = Math.min(activeJob.units, activeJob.loadedUnits + 1);
+        const loaded = loadedUnits >= activeJob.units;
+        carriedFreightRef.current = null;
+        setCarriedFreight(null);
+        updateFreightJob(activeJob.id, { loadedUnits, loaded });
+        if (loaded) {
+          setMapWaypoint({ ...activeJob.delivery, label: `Разгрузка · ${activeJob.delivery.label}` });
+          flash(`${activeJob.cargo} загружены. Теперь отвезите груз получателю.`);
+        } else {
+          flash(`Коробка уложена в кузов · ${loadedUnits}/${activeJob.units}`);
+        }
+        window.setTimeout(() => persistRef.current(), 0);
+        return true;
+      }
+      if (activeJob.loaded && nearDelivery && carried.jobId === activeJob.id) {
+        const deliveredUnits = Math.min(activeJob.units, activeJob.deliveredUnits + 1);
+        carriedFreightRef.current = null;
+        setCarriedFreight(null);
+        if (deliveredUnits >= activeJob.units) {
+          completeFreightJob({ ...activeJob, deliveredUnits });
+        } else {
+          updateFreightJob(activeJob.id, { deliveredUnits });
+          flash(`Груз сдан · ${deliveredUnits}/${activeJob.units}`);
+        }
+        return true;
+      }
+      flash("Подойдите к кузову, тележке или точке разгрузки");
+      return true;
+    }
+
+    if (!activeJob.loaded && usingFreightTrolleyRef.current && nearCar && carAtPickup && trolleyCargoUnitsRef.current > 0) {
+      const nextTrolleyUnits = trolleyCargoUnitsRef.current - 1;
+      const loadedUnits = Math.min(activeJob.units, activeJob.loadedUnits + 1);
+      const loaded = loadedUnits >= activeJob.units;
+      trolleyCargoUnitsRef.current = nextTrolleyUnits;
+      setTrolleyCargoUnits(nextTrolleyUnits);
+      updateFreightJob(activeJob.id, { loadedUnits, loaded });
+      if (loaded) {
+        usingFreightTrolleyRef.current = false;
+        setUsingFreightTrolley(false);
+        setMapWaypoint({ ...activeJob.delivery, label: `Разгрузка · ${activeJob.delivery.label}` });
+        flash("Последняя коробка перегружена. Кузов заполнен.");
+      } else {
+        flash(`С тележки в кузов · ${loadedUnits}/${activeJob.units}`);
+      }
+      return true;
+    }
+
+    if (activeJob.loaded && nearCar && carAtDelivery && activeJob.deliveredUnits < activeJob.units) {
+      const carriedUnit: CarriedFreightUnit = {
+        jobId: activeJob.id,
+        label: activeJob.cargo,
+        weight: activeJob.unitWeight,
+        volume: Math.round(activeJob.volume / activeJob.units),
+      };
+      carriedFreightRef.current = carriedUnit;
+      setCarriedFreight(carriedUnit);
+      flash(`${activeJob.cargo}: груз извлечён из кузова`);
+      return true;
+    }
+
+    const preparedUnits = activeJob.loadedUnits + trolleyCargoUnitsRef.current;
+    if (!activeJob.loaded && nearPickup && carAtPickup && preparedUnits < activeJob.units) {
+      const carriedUnit: CarriedFreightUnit = {
+        jobId: activeJob.id,
+        label: activeJob.cargo,
+        weight: activeJob.unitWeight,
+        volume: Math.round(activeJob.volume / activeJob.units),
+      };
+      carriedFreightRef.current = carriedUnit;
+      setCarriedFreight(carriedUnit);
+      flash(`${activeJob.cargo} в руках · ${activeJob.unitWeight} кг · бег недоступен`);
+      return true;
+    }
+
+    if (nearTrolley) {
+      const nextUsing = !usingFreightTrolleyRef.current;
+      usingFreightTrolleyRef.current = nextUsing;
+      setUsingFreightTrolley(nextUsing);
+      flash(nextUsing ? "Тележка взята · скорость ограничена" : "Тележка оставлена");
+      return true;
+    }
+    return false;
+  };
+  freightInteractionRef.current = handleFreightInteraction;
+
+  const routeFreightJob = (activeJob: FreightJob) => {
+    const target = activeJob.loaded ? activeJob.delivery : activeJob.pickup;
+    setMapWaypoint({ ...target, label: activeJob.loaded ? `Разгрузка · ${target.label}` : `Погрузка · ${target.label}` });
+    setMode("world");
+    flash(activeJob.loaded ? "Следуйте к точке разгрузки" : "Припаркуйтесь в жёлтой зоне погрузки");
+  };
+
+  const orderAutomaticFreightLoading = () => {
     const activeJob = freightJobsRef.current.find((job) => job.status === "active");
     const car = engineRef.current.car;
-    if (!activeJob || !car || !currentVehicleRef.current) return flash("Нет активного грузового заказа");
-    const target = activeJob.loaded ? activeJob.delivery : activeJob.pickup;
-    if (Math.hypot(car.position.x - target.x, car.position.z - target.z) > 28) {
-      setMapWaypoint({ ...target, label: activeJob.loaded ? `Разгрузка · ${target.label}` : `Погрузка · ${target.label}` });
-      return flash(`Сначала прибудьте: ${target.label}`);
+    if (!activeJob || activeJob.loaded || !car) return flash("Сейчас автоматическая погрузка недоступна");
+    if (Math.hypot(car.position.x - activeJob.pickup.x, car.position.z - activeJob.pickup.z) >= 28) {
+      setMapWaypoint({ ...activeJob.pickup, label: `Погрузка · ${activeJob.pickup.label}` });
+      return flash("Сначала припаркуйте грузовик в зоне погрузки");
     }
-    if (!activeJob.loaded) {
-      const next = freightJobsRef.current.map((job) => job.id === activeJob.id ? { ...job, loaded: true } : job);
-      freightJobsRef.current = next;
-      setFreightJobs(next);
+    const price = clamp(activeJob.units * 60, 200, 500);
+    if (moneyRef.current < price) return flash(`Для погрузчиков нужно ${price} ₽`);
+    const nextMoney = moneyRef.current - price;
+    moneyRef.current = nextMoney;
+    setMoney(nextMoney);
+    setFreightServiceStatus("Грузчики работают · осталось около 30 секунд");
+    carriedFreightRef.current = null;
+    trolleyCargoUnitsRef.current = 0;
+    usingFreightTrolleyRef.current = false;
+    setCarriedFreight(null);
+    setTrolleyCargoUnits(0);
+    setUsingFreightTrolley(false);
+    window.setTimeout(() => {
+      const current = freightJobsRef.current.find((job) => job.id === activeJob.id && job.status === "active");
+      if (!current) return;
+      updateFreightJob(activeJob.id, { loaded: true, loadedUnits: activeJob.units });
       setMapWaypoint({ ...activeJob.delivery, label: `Разгрузка · ${activeJob.delivery.label}` });
-      flash(`${activeJob.cargo} загружены · ${activeJob.volume} грузовых единиц`);
-    } else {
-      const nextMoney = moneyRef.current + activeJob.reward;
-      const nextCompleted = completedFreightJobsRef.current + 1;
-      const next = freightJobsRef.current.map((job) => job.id === activeJob.id ? { ...job, status: "completed" as FreightJobStatus } : job);
-      moneyRef.current = nextMoney;
-      freightJobsRef.current = next;
-      completedFreightJobsRef.current = nextCompleted;
-      setMoney(nextMoney);
-      setFreightJobs(next);
-      setCompletedFreightJobs(nextCompleted);
-      setReputation((value) => Math.min(100, value + 3));
-      setMapWaypoint(null);
-      flash(`Груз доставлен · +${activeJob.reward.toLocaleString("ru-RU")} ₽ · репутация +3`);
-    }
-    persistRef.current();
+      setFreightServiceStatus("Автоматическая погрузка завершена");
+      flash("Погрузчики закончили работу. Можно ехать.");
+      persistRef.current();
+    }, 30_000);
   };
 
   function stopRadioStream(keepStatus = false) {
@@ -5891,7 +6372,7 @@ export default function SecurityConsoleGame() {
     if (!keepStatus) setRadioStreamStatus("Офлайн-радио готово");
   }
 
-  function startRadioStream(urlOverride?: string, attempt = 0) {
+  function startRadioStream(urlOverride?: string, attempt = 0, stationName = "Интернет-эфир") {
     const rawUrl = (urlOverride ?? customRadioUrlRef.current).trim();
     const upgradedFromHttp = /^http:\/\//i.test(rawUrl);
     const url = upgradedFromHttp ? rawUrl.replace(/^http:\/\//i, "https://") : rawUrl;
@@ -5904,7 +6385,7 @@ export default function SecurityConsoleGame() {
     customRadioUrlRef.current = url;
     setCustomRadioUrl(url);
     setRadioMode("stream");
-    setRadioStation("Интернет-эфир");
+    setRadioStation(stationName);
     setRadioPlaying(true);
     setRadioStreamStatus(
       attempt
@@ -5915,7 +6396,6 @@ export default function SecurityConsoleGame() {
     );
 
     const stream = new Audio();
-    stream.crossOrigin = "anonymous";
     stream.preload = "none";
     stream.src = url;
     stream.volume = clamp(
@@ -5942,7 +6422,7 @@ export default function SecurityConsoleGame() {
       if (attempt < 2) {
         const delay = 1800 * (attempt + 1);
         setRadioStreamStatus(`Ошибка потока · повтор через ${Math.round(delay / 1000)} сек.`);
-        radioReconnectTimerRef.current = window.setTimeout(() => startRadioStream(url, attempt + 1), delay);
+        radioReconnectTimerRef.current = window.setTimeout(() => startRadioStream(url, attempt + 1, stationName), delay);
       } else {
         setRadioMode("local");
         setRadioStation("Lo‑Fi Beats");
@@ -6147,8 +6627,13 @@ export default function SecurityConsoleGame() {
           </div>
           {freightJobs.find((job) => job.status === "active") && (() => {
             const job = freightJobs.find((item) => item.status === "active")!;
-            return <div className="freight-hud"><b>▦ {job.title}</b><span>{job.loaded ? `Доставить: ${job.delivery.label}` : `Загрузить: ${job.pickup.label}`}</span><small>{job.volume} ед. · награда {job.reward.toLocaleString("ru-RU")} ₽</small></div>;
+            return <div className="freight-hud">
+              <b>▦ {job.title}</b>
+              <span>{job.loaded ? `Разгружено: ${job.deliveredUnits}/${job.units}` : `В кузове: ${job.loadedUnits}/${job.units} · тележка: ${trolleyCargoUnits}/5`}</span>
+              <small>{carriedFreight ? `В руках: ${carriedFreight.label} · ${carriedFreight.weight} кг` : job.loaded ? `Доставить: ${job.delivery.label}` : `Загрузить: ${job.pickup.label}`}</small>
+            </div>;
           })()}
+          {freightContextHint && <div className="freight-context-hint"><kbd>E</kbd><span>{freightContextHint.replace(/^E · /, "")}</span></div>}
           {trafficIncident && <div className="traffic-incident"><b>{trafficIncident.title}</b><span>{trafficIncident.detail}</span><strong>{trafficIncident.fine > 0 ? `−${trafficIncident.fine.toLocaleString("ru-RU")} ₽` : "Без штрафа"}</strong></div>}
           <div className="daily-hud">
             {dailyChallenges.activeChallenges.filter((challenge) => challenge.tracked && !challenge.claimed).slice(0, 2).map((challenge) => {
@@ -6293,11 +6778,19 @@ export default function SecurityConsoleGame() {
                       <div><small>{job.cargo} · {job.volume} ед.</small><b>{job.title}</b><span>{job.pickup.label} → {job.delivery.label}</span></div>
                       <strong>{job.reward.toLocaleString("ru-RU")} ₽</strong>
                       {job.status === "available" && <button onClick={() => acceptFreightJob(job.id)}>Взять заказ</button>}
-                      {job.status === "active" && <button onClick={processFreightJob}>{job.loaded ? "Разгрузить" : "Загрузить"}</button>}
+                      {job.status === "active" && <>
+                        <div className="freight-progress">
+                          <span>{job.loaded ? `Доставлено ${job.deliveredUnits}/${job.units}` : `Загружено ${job.loadedUnits}/${job.units}`}</span>
+                          <i style={{ width: `${(job.loaded ? job.deliveredUnits : job.loadedUnits) / job.units * 100}%` }} />
+                        </div>
+                        <button onClick={() => routeFreightJob(job)}>{job.loaded ? "Маршрут к разгрузке" : "Маршрут к складу"}</button>
+                        {!job.loaded && <button className="secondary" onClick={orderAutomaticFreightLoading}>Заказать погрузчиков · {clamp(job.units * 60, 200, 500)} ₽</button>}
+                      </>}
                       {job.status === "completed" && <em>Доставлено</em>}
                     </article>
                   ))}
-                  <small>Для заказа нужен коммерческий автомобиль подходящей вместимости. Погрузка и разгрузка доступны рядом с отмеченной точкой.</small>
+                  {freightServiceStatus && <div className="freight-service-status">{freightServiceStatus}</div>}
+                  <small>Припаркуйте грузовик в размеченной зоне, выйдите, берите по одной коробке клавишей E и относите её в кузов. Тележка вмещает до пяти коробок.</small>
                 </div>
               )}
               {phoneApp === "contacts" && (
@@ -6328,6 +6821,14 @@ export default function SecurityConsoleGame() {
                 <div className="phone-page phone-radio">
                   <div className={`radio-cover ${radioPlaying ? "playing" : ""}`}><i>♫</i><b>{radioStation}</b><span>{radioMode === "stream" ? radioStreamStatus : radioPlaying ? "Офлайн-эфир" : "Пауза"}</span></div>
                   {["Ретро FM", "Дорожное радио", "Вести посёлка", "Пультовая волна", "Lo‑Fi Beats"].map((station) => <button className={radioMode === "local" && radioStation === station ? "active" : ""} key={station} onClick={() => selectLocalRadio(station)}><b>{station}</b><span>{station === "Lo‑Fi Beats" ? "Оригинальный спокойный синтезированный фон" : station === "Вести посёлка" ? `Новости: ${locationName}, ${weather.toLowerCase()}` : station === "Пультовая волна" ? "Переговоры диспетчера и экипажей" : "Оригинальная музыкальная программа дороги"}</span></button>)}
+                  <section className="record-radio">
+                    <div><b>Radio Record</b><span>{RADIO_RECORD_STATIONS.length} прямых радиостанций</span></div>
+                    <select value={recordStationUrl} onChange={(event) => setRecordStationUrl(event.target.value)} aria-label="Выбор станции Radio Record">
+                      {RADIO_RECORD_STATIONS.map(([name, url]) => <option key={url} value={url}>{name}</option>)}
+                    </select>
+                    <button type="button" onClick={() => startRadioStream(selectedRecordStation[1], 0, `Radio Record · ${selectedRecordStation[0]}`)}>Включить «{selectedRecordStation[0]}»</button>
+                    <small>AAC-поток запускается прямо в смартфоне и продолжает играть пешком и в машине.</small>
+                  </section>
                   <section className="stream-radio">
                     <div><b>Свой интернет-эфир</b><span>Прямая лицензированная HTTP/HTTPS-ссылка на MP3, AAC или OGG. Небезопасный HTTP будет автоматически заменён на HTTPS.</span></div>
                     <input value={customRadioUrl} inputMode="url" placeholder="https://radio.example/stream.mp3" onChange={(event) => { customRadioUrlRef.current = event.target.value; setCustomRadioUrl(event.target.value); }} />

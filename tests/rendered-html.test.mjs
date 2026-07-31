@@ -333,7 +333,7 @@ test("supports licensed custom radio streams with resilient offline fallback and
   assert.match(source, /new Audio\(\)/);
   assert.match(source, /rawUrl\.replace\(\/\^http:/);
   assert.match(source, /HTTP автоматически заменён на защищённый HTTPS/);
-  assert.match(source, /stream\.crossOrigin = "anonymous"/);
+  assert.doesNotMatch(source, /stream\.crossOrigin = "anonymous"/);
   assert.match(source, /stream\.load\(\)/);
   assert.match(source, /attempt < 2/);
   assert.match(source, /Поток недоступен · включено офлайн-радио/);
@@ -374,7 +374,7 @@ test("adds the carrier career, industrial logistics, inventory, and wildlife", a
   assert.match(source, /Начать карьеру перевозчика/);
   assert.match(source, /e\.code === "KeyI"/);
   assert.match(source, /transferInventoryItem/);
-  assert.match(source, /processFreightJob/);
+  assert.match(source, /handleFreightInteraction/);
   assert.match(source, /ПРОДУКТОВАЯ БАЗА/);
   assert.match(source, /СКЛАД СПЕКТР/);
   assert.match(source, /const board = makeReadableTextSign\([\s\S]*makeTextBoard\(building\.label/);
@@ -384,6 +384,34 @@ test("adds the carrier career, industrial logistics, inventory, and wildlife", a
   assert.match(styles, /\.carrier-career/);
   assert.match(styles, /\.freight-app/);
   assert.match(styles, /\.inventory-overlay/);
+});
+
+test("adds Radio Record, stable asphalt suspension, and physical freight handling", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /const RADIO_RECORD_STATIONS = \[/);
+  assert.match(source, /rr_main96\.aacp/);
+  assert.match(source, /christmaschill96\.aacp/);
+  assert.match(source, /Radio Record · \$\{selectedRecordStation\[0\]\}/);
+  assert.match(source, /aria-label="Выбор станции Radio Record"/);
+  assert.match(styles, /\.record-radio/);
+
+  assert.match(source, /const suspensionTravel = surface === "Асфальт"\s*\?\s*0/);
+  assert.match(source, /carVisual\.position\.y = THREE\.MathUtils\.lerp/);
+  assert.doesNotMatch(source, /carVisual\.position\.y = Math\.sin\(now \* 0\.013\)/);
+
+  assert.match(source, /type CarriedFreightUnit/);
+  assert.match(source, /freightTrolleyCargo/);
+  assert.match(source, /freightInteractionRef\.current\(\)/);
+  assert.match(source, /const freightSpeed = carryingCargo \? 0\.6 : pushingTrolley \? 0\.52 : 1/);
+  assert.match(source, /orderAutomaticFreightLoading/);
+  assert.match(source, /30_000/);
+  assert.match(source, /берите по одной коробке клавишей E/);
+  assert.match(styles, /\.freight-context-hint/);
+  assert.match(styles, /\.freight-progress/);
 });
 
 test("keeps residents facing the street and connects every house to a footpath", async () => {
