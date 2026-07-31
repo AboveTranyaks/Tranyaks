@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "pause" | "tariff" | "office" | "station" | "transit" | "busRide";
+type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "inventory" | "pause" | "tariff" | "office" | "station" | "transit" | "busRide";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
@@ -16,11 +16,40 @@ type SaveSlotId = "auto" | "slot1" | "slot2" | "slot3";
 type PrivacyMode = "all" | "summary" | "hidden";
 type AvatarId = "avatar_01" | "avatar_02" | "avatar_03" | "avatar_04";
 type DistrictId = "central" | "residential" | "industrial" | "elite";
-type VehicleId = "old_sedan" | "oka" | "granta" | "camry" | "largus" | "niva" | "pickup" | "gazelle" | "supra" | "enduro";
+type VehicleId = "old_sedan" | "oka" | "granta" | "camry" | "largus" | "niva" | "pickup" | "gazelle" | "supra" | "enduro" | "uaz_profi" | "gazelle_box" | "gazelle_flatbed" | "kamaz" | "reefer" | "dumptruck";
 type DrivingSide = "right" | "left";
-type PhoneApp = "home" | "taxi" | "contacts" | "notifications" | "camera" | "radio" | "notes" | "settings";
+type PhoneApp = "home" | "taxi" | "freight" | "contacts" | "notifications" | "camera" | "radio" | "notes" | "settings";
 type PhoneTheme = "dark" | "light";
 type PhoneWallpaper = "village" | "night" | "forest";
+type CareerRole = "manager" | "carrier";
+type InventoryItemId = "battery" | "leaflet" | "snack" | "coffee" | "toolkit" | "sensor" | "camera" | "cat_food" | "dog_food" | "grain";
+type InventoryStack = { id: InventoryItemId; amount: number };
+type FreightJobStatus = "available" | "active" | "completed";
+type FreightJob = {
+  id: string;
+  title: string;
+  cargo: string;
+  volume: number;
+  pickup: { label: string; x: number; z: number };
+  delivery: { label: string; x: number; z: number };
+  reward: number;
+  deadlineHours: number;
+  status: FreightJobStatus;
+  loaded: boolean;
+};
+type WildlifeKind = "cat" | "dog" | "cow" | "goat" | "chicken" | "horse" | "hare" | "fox" | "hedgehog" | "bird" | "stork" | "butterfly";
+type WildlifeAgent = {
+  id: number;
+  kind: WildlifeKind;
+  mesh: THREE.Group;
+  homeX: number;
+  homeZ: number;
+  radius: number;
+  speed: number;
+  phase: number;
+  flying: boolean;
+  frightenedUntil: number;
+};
 
 type AudioMix = {
   master: number;
@@ -204,6 +233,11 @@ type SaveData = {
   uiScale?: number;
   audioMix?: AudioMix;
   customRadioUrl?: string;
+  careerRole?: CareerRole;
+  inventory?: InventoryStack[];
+  trunkInventory?: InventoryStack[];
+  freightJobs?: FreightJob[];
+  completedFreightJobs?: number;
 };
 
 type SaveEnvelope = {
@@ -355,6 +389,8 @@ type VehicleSpec = {
   fuelUse: number;
   capacity: number;
   description: string;
+  cargo?: number;
+  commercial?: boolean;
 };
 
 const DISTRICTS: DistrictSpec[] = [
@@ -430,9 +466,34 @@ const VEHICLES: VehicleSpec[] = [
   { id: "gazelle", name: "Газель ГБР", className: "Фургон", price: 120000, usedPrice: 70000, maxSpeed: 125, fuelUse: 14, capacity: 6, description: "Экипаж ГБР и до 1000 кг оборудования." },
   { id: "supra", name: "Supra lowpoly", className: "Спорткар", price: 180000, usedPrice: 100000, maxSpeed: 230, fuelUse: 15, capacity: 2, description: "Очень быстрая, престижная и непрактичная." },
   { id: "enduro", name: "Эндуро 250", className: "Мотоцикл", price: 35000, usedPrice: 20000, maxSpeed: 125, fuelUse: 3, capacity: 1, description: "Проезжает по тропинкам, но не возит груз." },
+  { id: "uaz_profi", name: "УАЗ Профи", className: "Коммерческий · малотоннажный", price: 80000, usedPrice: 48000, maxSpeed: 120, fuelUse: 9, capacity: 2, cargo: 400, commercial: true, description: "Экономичный первый грузовик для малых партий." },
+  { id: "gazelle_box", name: "ГАЗель-фургон", className: "Коммерческий · фургон", price: 120000, usedPrice: 72000, maxSpeed: 115, fuelUse: 12, capacity: 3, cargo: 600, commercial: true, description: "Закрытый кузов защищает оборудование и продукты." },
+  { id: "gazelle_flatbed", name: "ГАЗель-борт", className: "Коммерческий · бортовой", price: 100000, usedPrice: 60000, maxSpeed: 115, fuelUse: 11, capacity: 3, cargo: 500, commercial: true, description: "Недорогая машина для стройматериалов и мебели." },
+  { id: "kamaz", name: "КамАЗ-5490", className: "Коммерческий · тягач", price: 350000, usedPrice: 230000, maxSpeed: 105, fuelUse: 25, capacity: 2, cargo: 1500, commercial: true, description: "Магистральный тягач для самых крупных заказов." },
+  { id: "reefer", name: "Рефрижератор", className: "Коммерческий · изотермический", price: 200000, usedPrice: 130000, maxSpeed: 110, fuelUse: 16, capacity: 2, cargo: 700, commercial: true, description: "Сохраняет свежие продукты во время доставки." },
+  { id: "dumptruck", name: "Самосвал", className: "Коммерческий · строительный", price: 180000, usedPrice: 110000, maxSpeed: 95, fuelUse: 20, capacity: 2, cargo: 800, commercial: true, description: "Перевозит кирпич, цемент и сыпучие грузы." },
 ];
 
 const VEHICLE_BY_ID = Object.fromEntries(VEHICLES.map((vehicle) => [vehicle.id, vehicle])) as Record<VehicleId, VehicleSpec>;
+const INVENTORY_ITEMS: Record<InventoryItemId, { name: string; slots: number; weight: number; icon: string }> = {
+  battery: { name: "Батарейка", slots: 1, weight: 0.1, icon: "▤" },
+  leaflet: { name: "Буклет", slots: 1, weight: 0.05, icon: "▧" },
+  snack: { name: "Снек", slots: 1, weight: 0.2, icon: "◆" },
+  coffee: { name: "Кофе", slots: 1, weight: 0.3, icon: "☕" },
+  toolkit: { name: "Набор инструментов", slots: 2, weight: 3.4, icon: "⚒" },
+  sensor: { name: "Датчик охраны", slots: 2, weight: 0.8, icon: "◉" },
+  camera: { name: "Камера наблюдения", slots: 3, weight: 1.6, icon: "▣" },
+  cat_food: { name: "Корм для кошек", slots: 1, weight: 0.5, icon: "◔" },
+  dog_food: { name: "Корм для собак", slots: 1, weight: 0.8, icon: "◕" },
+  grain: { name: "Зерно для птиц", slots: 1, weight: 0.6, icon: "✦" },
+};
+const DEFAULT_FREIGHT_JOBS: FreightJob[] = [
+  { id: "fresh-food", title: "Свежие продукты", cargo: "Овощи и молочная продукция", volume: 180, pickup: { label: "Продуктовая база", x: 3650, z: 112 }, delivery: { label: "Супермаркет «Динской»", x: 3995, z: -24 }, reward: 1400, deadlineHours: 4, status: "available", loaded: false },
+  { id: "electronics", title: "Камеры для магазина", cargo: "Камеры, датчики и провода", volume: 120, pickup: { label: "Склад «Спектр»", x: 3710, z: 112 }, delivery: { label: "Магазин электроники", x: 4058, z: 44 }, reward: 1700, deadlineHours: 5, status: "available", loaded: false },
+  { id: "building", title: "Материалы на стройку", cargo: "Кирпичи и цемент", volume: 460, pickup: { label: "Склад хозтоваров", x: 3680, z: 145 }, delivery: { label: "Стройка в Первореченском", x: -112, z: 118 }, reward: 3600, deadlineHours: 8, status: "available", loaded: false },
+  { id: "market", title: "Фермерский рейс", cargo: "Ящики с овощами", volume: 260, pickup: { label: "Ферма Динской", x: 4125, z: 142 }, delivery: { label: "Открытый рынок", x: 3970, z: -98 }, reward: 2100, deadlineHours: 6, status: "available", loaded: false },
+  { id: "furniture", title: "Переезд Петровых", cargo: "Шкаф и домашняя мебель", volume: 380, pickup: { label: "Озёрная улица", x: 4080, z: -132 }, delivery: { label: "Новый дом", x: 1350, z: 116 }, reward: 2900, deadlineHours: 7, status: "available", loaded: false },
+];
 const EMPTY_STAFF: StaffState = { dispatchers: 0, gbrCrews: 0, technicians: 0, salesManagers: 0, cleaners: 0 };
 const STAFF_ROLES = [
   { key: "dispatchers", name: "Диспетчер", salary: 8000, description: "Обрабатывает обычные тревоги." },
@@ -778,6 +839,11 @@ const DEFAULT_SAVE: SaveData = {
   uiScale: 1,
   audioMix: DEFAULT_AUDIO_MIX,
   customRadioUrl: "",
+  careerRole: "manager",
+  inventory: [{ id: "leaflet", amount: 5 }],
+  trunkInventory: [],
+  freightJobs: DEFAULT_FREIGHT_JOBS,
+  completedFreightJobs: 0,
 };
 
 function checksum(data: SaveData) {
@@ -837,6 +903,11 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
       voice: clamp(value?.audioMix?.voice ?? DEFAULT_AUDIO_MIX.voice, 0, 100),
     },
     customRadioUrl: typeof value?.customRadioUrl === "string" ? value.customRadioUrl.slice(0, 500) : "",
+    careerRole: value?.careerRole === "carrier" ? "carrier" : "manager",
+    inventory: Array.isArray(value?.inventory) ? value.inventory.filter((stack) => Boolean(INVENTORY_ITEMS[stack.id]) && stack.amount > 0).slice(0, 20) : [{ id: "leaflet", amount: 5 }],
+    trunkInventory: Array.isArray(value?.trunkInventory) ? value.trunkInventory.filter((stack) => Boolean(INVENTORY_ITEMS[stack.id]) && stack.amount > 0).slice(0, 40) : [],
+    freightJobs: Array.isArray(value?.freightJobs) ? value.freightJobs : DEFAULT_FREIGHT_JOBS,
+    completedFreightJobs: Math.max(0, value?.completedFreightJobs ?? 0),
     carFuel: value?.carFuel === undefined ? (ownedVehicles.length > 0 ? 20 : 0) : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
 }
@@ -1171,6 +1242,87 @@ function makePerson(color: number) {
     if (o instanceof THREE.Mesh) o.castShadow = true;
   });
   group.scale.setScalar(0.6);
+  return group;
+}
+
+function makeWildlife(kind: WildlifeKind, color: number) {
+  const group = new THREE.Group();
+  const material = mat(color);
+  const dark = mat(0x3d342c);
+  const isBird = kind === "bird" || kind === "stork";
+  const isFarm = kind === "cow" || kind === "horse";
+  const body = new THREE.Mesh(
+    isBird ? new THREE.IcosahedronGeometry(0.32, 0) : new THREE.IcosahedronGeometry(isFarm ? 0.82 : 0.48, 1),
+    material,
+  );
+  body.scale.set(isBird ? 1.25 : 1.45, isBird ? 0.72 : 0.85, isBird ? 0.8 : 0.82);
+  body.position.y = isBird ? 0.72 : isFarm ? 1.18 : 0.62;
+  body.name = "body";
+  group.add(body);
+
+  if (kind === "butterfly") {
+    body.visible = false;
+    for (const side of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.CircleGeometry(0.28, 5), mat(side < 0 ? 0xf0bb54 : 0xd7788a));
+      wing.position.set(side * 0.22, 0.62, 0);
+      wing.rotation.y = side * 0.45;
+      wing.name = side < 0 ? "leftWing" : "rightWing";
+      group.add(wing);
+    }
+  } else if (isBird) {
+    for (const side of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.ConeGeometry(kind === "stork" ? 0.58 : 0.38, kind === "stork" ? 1.6 : 0.9, 3), material);
+      wing.position.set(side * 0.55, 0.76, 0);
+      wing.rotation.z = side * Math.PI / 2;
+      wing.name = side < 0 ? "leftWing" : "rightWing";
+      group.add(wing);
+    }
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.09, kind === "stork" ? 0.72 : 0.35, 5), mat(0xe0a23d));
+    beak.position.set(0, 0.78, 0.48);
+    beak.rotation.x = Math.PI / 2;
+    group.add(beak);
+  } else {
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(isFarm ? 0.5 : 0.34, 1), material);
+    head.position.set(0, isFarm ? 1.42 : 0.82, isFarm ? 0.85 : 0.55);
+    group.add(head);
+    if (kind !== "hedgehog" && kind !== "chicken") {
+      const tail = new THREE.Mesh(new THREE.ConeGeometry(kind === "fox" ? 0.28 : 0.12, kind === "fox" ? 1.1 : 0.65, 6), material);
+      tail.position.set(0, isFarm ? 1.1 : 0.65, isFarm ? -0.95 : -0.62);
+      tail.rotation.x = -Math.PI / 3;
+      tail.name = "tail";
+      group.add(tail);
+    }
+    const legs = kind === "chicken" ? 2 : 4;
+    for (let index = 0; index < legs; index++) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, isFarm ? 0.78 : 0.38, 5), kind === "chicken" ? mat(0xd9a044) : dark);
+      const side = index % 2 === 0 ? -1 : 1;
+      const row = index < 2 ? 0.28 : -0.28;
+      leg.position.set(side * (isFarm ? 0.42 : 0.23), isFarm ? 0.42 : 0.2, row);
+      leg.name = `animalLeg${index}`;
+      group.add(leg);
+    }
+    if (kind === "cat" || kind === "dog" || kind === "hare" || kind === "fox") {
+      for (const side of [-1, 1]) {
+        const ear = new THREE.Mesh(new THREE.ConeGeometry(0.14, kind === "hare" ? 0.65 : 0.34, 4), material);
+        ear.position.set(side * 0.2, kind === "hare" ? 1.35 : 1.16, 0.52);
+        group.add(ear);
+      }
+    }
+    if (kind === "cow" || kind === "goat") {
+      for (const side of [-1, 1]) {
+        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.42, 5), mat(0xe8dfbd));
+        horn.position.set(side * 0.38, isFarm ? 1.8 : 1.18, isFarm ? 0.83 : 0.55);
+        horn.rotation.z = side * 0.42;
+        group.add(horn);
+      }
+    }
+  }
+  group.traverse((object) => {
+    if (object instanceof THREE.Mesh) {
+      object.castShadow = true;
+      object.receiveShadow = true;
+    }
+  });
   return group;
 }
 
@@ -1584,6 +1736,7 @@ export default function SecurityConsoleGame() {
     walkers: Walker[];
     traffic: TrafficVehicle[];
     busPassengers: BusPassenger[];
+    wildlife: WildlifeAgent[];
     benches: THREE.Vector3[];
     remoteMeshes: Map<string, THREE.Group>;
     nearest: Resident | null;
@@ -1611,6 +1764,7 @@ export default function SecurityConsoleGame() {
     walkers: [],
     traffic: [],
     busPassengers: [],
+    wildlife: [],
     benches: [],
     remoteMeshes: new Map(),
     nearest: null,
@@ -1715,6 +1869,16 @@ export default function SecurityConsoleGame() {
   const ownedVehiclesRef = useRef(ownedVehicles);
   const [currentVehicle, setCurrentVehicle] = useState<VehicleId | null>(initialSave.currentVehicle ?? null);
   const currentVehicleRef = useRef(currentVehicle);
+  const [careerRole, setCareerRole] = useState<CareerRole>(initialSave.careerRole ?? "manager");
+  const careerRoleRef = useRef<CareerRole>(careerRole);
+  const [inventory, setInventory] = useState<InventoryStack[]>(initialSave.inventory ?? [{ id: "leaflet", amount: 5 }]);
+  const inventoryRef = useRef(inventory);
+  const [trunkInventory, setTrunkInventory] = useState<InventoryStack[]>(initialSave.trunkInventory ?? []);
+  const trunkInventoryRef = useRef(trunkInventory);
+  const [freightJobs, setFreightJobs] = useState<FreightJob[]>(initialSave.freightJobs ?? DEFAULT_FREIGHT_JOBS);
+  const freightJobsRef = useRef(freightJobs);
+  const [completedFreightJobs, setCompletedFreightJobs] = useState(initialSave.completedFreightJobs ?? 0);
+  const completedFreightJobsRef = useRef(completedFreightJobs);
   const [rentalActive, setRentalActive] = useState(false);
   const [loan, setLoan] = useState<LoanState>(initialSave.loan ?? null);
   const loanRef = useRef(loan);
@@ -1795,10 +1959,19 @@ export default function SecurityConsoleGame() {
   const radioStreamRef = useRef<HTMLAudioElement | null>(null);
   const radioReconnectTimerRef = useRef<number | null>(null);
   const lastAmbientSoundAtRef = useRef(0);
+  const lastWildlifeCollisionAtRef = useRef(0);
 
   useEffect(() => {
     moneyRef.current = money;
   }, [money]);
+
+  useEffect(() => {
+    careerRoleRef.current = careerRole;
+    inventoryRef.current = inventory;
+    trunkInventoryRef.current = trunkInventory;
+    freightJobsRef.current = freightJobs;
+    completedFreightJobsRef.current = completedFreightJobs;
+  }, [careerRole, completedFreightJobs, freightJobs, inventory, trunkInventory]);
 
   const signedCount = residents.filter((r) => r.signed).length;
   const totalContracts = signedCount + extendedContracts.length;
@@ -1901,6 +2074,11 @@ export default function SecurityConsoleGame() {
         uiScale: uiScaleRef.current,
         audioMix: audioMixRef.current,
         customRadioUrl: customRadioUrlRef.current,
+        careerRole: careerRoleRef.current,
+        inventory: inventoryRef.current,
+        trunkInventory: trunkInventoryRef.current,
+        freightJobs: freightJobsRef.current,
+        completedFreightJobs: completedFreightJobsRef.current,
       };
       const envelope = writeEnvelope(slot, saveName, save);
       setSaveSlots((current) => ({ ...current, [slot]: envelope }));
@@ -2221,6 +2399,11 @@ export default function SecurityConsoleGame() {
     staffRef.current = staff;
     ownedVehiclesRef.current = ownedVehicles;
     currentVehicleRef.current = currentVehicle;
+    const activeCarMesh = engineRef.current.car;
+    if (activeCarMesh) {
+      const commercial = currentVehicle ? Boolean(VEHICLE_BY_ID[currentVehicle].commercial) : false;
+      activeCarMesh.scale.set(commercial ? 1.15 : 1, commercial ? 1.16 : 1, commercial ? 1.28 : 1);
+    }
     loanRef.current = loan;
     businessMonthRef.current = businessMonth;
     officeRentedRef.current = officeRented;
@@ -2588,6 +2771,7 @@ export default function SecurityConsoleGame() {
     engine.walkers = [];
     engine.traffic = [];
     engine.busPassengers = [];
+    engine.wildlife = [];
     engine.benches = [];
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 420), mat(0x78ad5d));
@@ -2950,6 +3134,43 @@ export default function SecurityConsoleGame() {
       { x: 3990, z: 126, halfX: 11, halfZ: 9, kind: "landmark" },
     );
 
+    // Dinskaya industrial district: three warehouses, freight terminal,
+    // workshop, paving-stone plant, truck stop and loading staff.
+    box(scene, [250, 0.16, 8], [3690, 0.09, 82], 0x777973);
+    const industrialBuildings = [
+      { x: 3650, z: 112, w: 31, d: 19, wall: 0xa8aa9f, roof: 0x59636a, label: "ПРОДУКТОВАЯ БАЗА" },
+      { x: 3680, z: 145, w: 34, d: 20, wall: 0xb29a78, roof: 0x675c50, label: "ХОЗТОВАРЫ" },
+      { x: 3710, z: 112, w: 30, d: 19, wall: 0x6f8d7c, roof: 0x3f5d51, label: "СКЛАД СПЕКТР" },
+      { x: 3750, z: 145, w: 38, d: 21, wall: 0x858b8c, roof: 0x4d565b, label: "ЦЕХ ПЛИТКИ" },
+      { x: 3598, z: 146, w: 28, d: 18, wall: 0x9c795e, roof: 0x51483f, label: "ГРУЗОВОЙ СЕРВИС" },
+    ];
+    industrialBuildings.forEach((building, index) => {
+      box(scene, [building.w, 8 + (index % 2), building.d], [building.x, 4 + (index % 2) * 0.5, building.z], building.wall);
+      box(scene, [building.w + 1.4, 0.85, building.d + 1.4], [building.x, 8.45 + (index % 2), building.z], building.roof);
+      box(scene, [7, 4.8, 0.3], [building.x, 2.45, building.z - building.d / 2 - 0.05], 0x4d5657);
+      const board = makeTextBoard(building.label, 512, 96, "#eef0e8", "#273d36");
+      board.position.set(building.x, 7.1 + (index % 2), building.z - building.d / 2 - 0.22);
+      board.scale.set(9.2, 1.7, 1);
+      scene.add(board);
+      engine.colliders.push({ x: building.x, z: building.z, halfX: building.w / 2 + 0.5, halfZ: building.d / 2 + 0.5, kind: "landmark" });
+    });
+    for (let index = 0; index < 12; index++) {
+      const container = new THREE.Mesh(new THREE.BoxGeometry(6.8, 2.8, 2.9), mat([0x68899a, 0xb86f55, 0x6f8c68, 0xd2a34e][index % 4]));
+      container.position.set(3608 + (index % 6) * 8, 1.45 + Math.floor(index / 6) * 2.9, 96);
+      container.castShadow = true;
+      scene.add(container);
+    }
+    for (let index = 0; index < 4; index++) {
+      const industrialNpc = makePerson([0x6d7e74, 0x9a765c, 0x527491, 0x806a55][index]);
+      industrialNpc.position.set(3638 + index * 27, 0, 84);
+      industrialNpc.rotation.y = Math.PI;
+      const questMarker = new THREE.Mesh(new THREE.OctahedronGeometry(0.48, 0), mat(0xe8aa3c));
+      questMarker.position.y = 5.4;
+      questMarker.name = "freightQuestMarker";
+      industrialNpc.add(questMarker);
+      scene.add(industrialNpc);
+    }
+
     // Distinct service centres make the two unlockable districts readable from the road.
     box(scene, [24, 8, 15], [1350, 4, -34], 0xb68f6a);
     box(scene, [26, 1.2, 17], [1350, 8.5, -34], 0x6e765f);
@@ -3074,6 +3295,50 @@ export default function SecurityConsoleGame() {
     }
     console.info("[NPCSpawner] Станица Динская: создано 30 уличных NPC");
 
+    const wildlifeSeeds: { kind: WildlifeKind; x: number; z: number; count: number; radius: number; color: number; flying?: boolean }[] = [
+      { kind: "cat", x: 4010, z: 42, count: 6, radius: 80, color: 0xb57b4f },
+      { kind: "dog", x: 3940, z: -108, count: 4, radius: 65, color: 0x7d5b42 },
+      { kind: "cow", x: 4125, z: 142, count: 5, radius: 38, color: 0xe8dfc9 },
+      { kind: "goat", x: 4100, z: 125, count: 4, radius: 34, color: 0xc9b894 },
+      { kind: "chicken", x: 4080, z: -128, count: 10, radius: 28, color: 0xc78652 },
+      { kind: "horse", x: 4140, z: 112, count: 2, radius: 32, color: 0x8a5d3f },
+      { kind: "hare", x: 2100, z: 145, count: 6, radius: 240, color: 0x9a876e },
+      { kind: "fox", x: 3180, z: -155, count: 2, radius: 130, color: 0xc86b3d },
+      { kind: "hedgehog", x: 70, z: 132, count: 5, radius: 75, color: 0x54473c },
+      { kind: "bird", x: 3980, z: -20, count: 14, radius: 120, color: 0x71818c, flying: true },
+      { kind: "stork", x: 820, z: 135, count: 4, radius: 260, color: 0xf1eee1, flying: true },
+      { kind: "butterfly", x: 40, z: 125, count: 12, radius: 80, color: 0xe9b84c, flying: true },
+    ];
+    let wildlifeId = 0;
+    wildlifeSeeds.forEach((seed) => {
+      for (let index = 0; index < seed.count; index++) {
+        const angle = (index / seed.count) * Math.PI * 2;
+        const distance = seed.radius * (0.35 + ((index * 37) % 60) / 100);
+        const animal = makeWildlife(seed.kind, seed.color + (index % 3) * 0x080402);
+        animal.position.set(
+          seed.x + Math.cos(angle) * distance,
+          seed.flying ? (seed.kind === "stork" ? 18 + (index % 3) * 4 : 2.5 + (index % 4)) : 0,
+          seed.z + Math.sin(angle) * distance,
+        );
+        const scale = seed.kind === "cow" || seed.kind === "horse" ? 1.15 : seed.kind === "chicken" ? 0.72 : 1;
+        animal.scale.setScalar(scale);
+        scene.add(animal);
+        engine.wildlife.push({
+          id: wildlifeId++,
+          kind: seed.kind,
+          mesh: animal,
+          homeX: seed.x,
+          homeZ: seed.z,
+          radius: seed.radius,
+          speed: seed.flying ? 1.4 + (index % 4) * 0.35 : 0.28 + (index % 5) * 0.14,
+          phase: angle,
+          flying: Boolean(seed.flying),
+          frightenedUntil: 0,
+        });
+      }
+    });
+    console.info(`[WildlifeManager] Создано животных и птиц: ${engine.wildlife.length}`);
+
     const trafficColors = [0x587e91, 0xd39a4b, 0x6f8c68, 0x8b6688, 0xc65d4d, 0xd4d0bd];
     for (let i = 0; i < 14; i++) {
       const laneZ = i % 2 === 0 ? -3.2 : 3.2;
@@ -3188,6 +3453,16 @@ export default function SecurityConsoleGame() {
         return;
       }
       if ((e.code === "KeyP" || e.code === "Escape") && modeRef.current === "tablet") {
+        engine.keys.clear();
+        setMode("world");
+        return;
+      }
+      if (e.code === "KeyI" && modeRef.current === "world") {
+        engine.keys.clear();
+        setMode("inventory");
+        return;
+      }
+      if ((e.code === "KeyI" || e.code === "Escape") && modeRef.current === "inventory") {
         engine.keys.clear();
         setMode("world");
         return;
@@ -3597,8 +3872,10 @@ export default function SecurityConsoleGame() {
         }
         const surfaceSpeed = pedestrianSurface.speed * (pedestrianSurface.onSidewalk ? 1 : outfit.ground) * (wetSidewalk ? 0.93 : 1);
         const fatigueSpeed = energyRef.current < 20 ? 0.7 : 1;
+        const carriedWeight = inventoryRef.current.reduce((sum, stack) => sum + INVENTORY_ITEMS[stack.id].weight * stack.amount, 0);
+        const overweightSpeed = clamp(1 - Math.max(0, carriedWeight - 10) * 0.05, 0.7, 1);
         const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.35;
-        const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed * (usingPhone ? 0.38 : 1);
+        const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed * overweightSpeed * (usingPhone ? 0.38 : 1);
         currentWalkSpeedKmh = moving ? speed * 3.6 : 0;
         if (moving) {
           const angle = engine.yaw;
@@ -3735,6 +4012,58 @@ export default function SecurityConsoleGame() {
         walker.mesh.position.z = walker.laneZ;
         walker.mesh.rotation.y = walker.direction > 0 ? Math.PI / 2 : -Math.PI / 2;
         personWalkCycle(walker.mesh, true, now, i * 0.7);
+      });
+      engine.wildlife.forEach((animal) => {
+        animal.phase += dt * animal.speed * (animal.frightenedUntil > now ? 3.2 : 1);
+        const playerDistance = Math.hypot(
+          animal.mesh.position.x - player.position.x,
+          animal.mesh.position.z - player.position.z,
+        );
+        if (!animal.flying && playerDistance < 5 && !["cat", "dog", "cow", "goat", "horse", "chicken"].includes(animal.kind)) {
+          animal.frightenedUntil = now + 4200;
+        }
+        if (animal.flying) {
+          animal.mesh.position.x = animal.homeX + Math.cos(animal.phase * 0.48 + animal.id) * animal.radius * 0.72;
+          animal.mesh.position.z = animal.homeZ + Math.sin(animal.phase * 0.48 + animal.id) * animal.radius * 0.52;
+          animal.mesh.position.y = animal.kind === "stork"
+            ? 19 + Math.sin(animal.phase * 0.7) * 4
+            : 2.5 + (animal.id % 4) + Math.sin(animal.phase * 1.6) * 0.8;
+          animal.mesh.rotation.y = -animal.phase * 0.48;
+        } else {
+          const roamRadius = animal.radius * (animal.frightenedUntil > now ? 0.72 : 0.42);
+          animal.mesh.position.x = animal.homeX + Math.cos(animal.phase + animal.id * 0.7) * roamRadius;
+          animal.mesh.position.z = animal.homeZ + Math.sin(animal.phase * 0.83 + animal.id) * roamRadius;
+          animal.mesh.rotation.y = Math.atan2(
+            -Math.sin(animal.phase + animal.id * 0.7),
+            Math.cos(animal.phase * 0.83 + animal.id),
+          );
+          animal.mesh.position.y = animal.kind === "hare" && animal.frightenedUntil > now
+            ? Math.abs(Math.sin(animal.phase * 7)) * 0.42
+            : 0;
+        }
+        const leftWing = animal.mesh.getObjectByName("leftWing");
+        const rightWing = animal.mesh.getObjectByName("rightWing");
+        if (leftWing) leftWing.rotation.z = Math.sin(animal.phase * 7) * 0.85;
+        if (rightWing) rightWing.rotation.z = -Math.sin(animal.phase * 7) * 0.85;
+        const tail = animal.mesh.getObjectByName("tail");
+        if (tail) tail.rotation.z = Math.sin(animal.phase * 4) * 0.26;
+        for (let legIndex = 0; legIndex < 4; legIndex++) {
+          const leg = animal.mesh.getObjectByName(`animalLeg${legIndex}`);
+          if (leg) leg.rotation.x = Math.sin(animal.phase * 5 + legIndex * Math.PI) * 0.35;
+        }
+        if (
+          engine.driving &&
+          !animal.flying &&
+          Math.abs(engine.carSpeed) > 2 &&
+          car.position.distanceTo(animal.mesh.position) < 2.1 &&
+          now - lastWildlifeCollisionAtRef.current > 4500
+        ) {
+          lastWildlifeCollisionAtRef.current = now;
+          engine.carSpeed *= 0.25;
+          animal.frightenedUntil = now + 8000;
+          setReputation((value) => Math.max(0, value - 15));
+          flash("Опасное столкновение с животным · репутация −15");
+        }
       });
       engine.traffic.forEach((trafficVehicle) => {
         const yieldingAtCrossing =
@@ -4644,8 +4973,8 @@ export default function SecurityConsoleGame() {
     flash(`Вы вышли: ${stop.name} · проезд ${fare} ₽`);
   };
 
-  const buyStoreItem = (kind: "batteries" | "food" | "tools" | "book" | "leaflets" | "billboard" | "radio") => {
-    const prices = { batteries: 1000, food: 100, tools: 3000, book: 2000, leaflets: 500, billboard: 10000, radio: 3000 };
+  const buyStoreItem = (kind: "batteries" | "food" | "tools" | "book" | "leaflets" | "billboard" | "radio" | "catFood" | "dogFood" | "grain") => {
+    const prices = { batteries: 1000, food: 100, tools: 3000, book: 2000, leaflets: 500, billboard: 10000, radio: 3000, catFood: 120, dogFood: 160, grain: 90 };
     const price = prices[kind];
     if (money < price) return flash(`Не хватает ${(price - money).toLocaleString("ru-RU")} ₽`);
     const nextMoney = money - price;
@@ -4660,6 +4989,15 @@ export default function SecurityConsoleGame() {
     if (kind === "leaflets") nextRep = clamp(nextRep + 1, 0, 100);
     if (kind === "billboard") nextRep = clamp(nextRep + 8, 0, 100);
     if (kind === "radio") nextRep = clamp(nextRep + 4, 0, 100);
+    const inventoryItem: InventoryItemId | null =
+      kind === "catFood" ? "cat_food" : kind === "dogFood" ? "dog_food" : kind === "grain" ? "grain" : null;
+    if (inventoryItem) {
+      const nextInventory = inventoryRef.current.some((stack) => stack.id === inventoryItem)
+        ? inventoryRef.current.map((stack) => stack.id === inventoryItem ? { ...stack, amount: stack.amount + 1 } : stack)
+        : [...inventoryRef.current, { id: inventoryItem, amount: 1 }];
+      inventoryRef.current = nextInventory;
+      setInventory(nextInventory);
+    }
     setMoney(nextMoney);
     setReputation(nextRep);
     persist(residentsRef.current, nextMoney, nextRep);
@@ -4877,6 +5215,119 @@ export default function SecurityConsoleGame() {
     ensureAudio();
   };
 
+  const startCareer = (role: CareerRole) => {
+    careerRoleRef.current = role;
+    setCareerRole(role);
+    if (role === "carrier") {
+      const startPosition = { x: 3625, z: 82 };
+      moneyRef.current = 10000;
+      ownedVehiclesRef.current = ["uaz_profi"];
+      currentVehicleRef.current = "uaz_profi";
+      setMoney(10000);
+      setOwnedVehicles(["uaz_profi"]);
+      setCurrentVehicle("uaz_profi");
+      engineRef.current.fuel = FUEL_TANK_LITERS;
+      engineRef.current.wear = 20;
+      engineRef.current.player?.position.set(startPosition.x, 0, startPosition.z);
+      if (engineRef.current.car) {
+        engineRef.current.car.position.set(startPosition.x + 7, 0, startPosition.z - 2);
+        engineRef.current.car.visible = true;
+        engineRef.current.car.scale.set(1.15, 1.16, 1.28);
+      }
+      setPlayerPos(startPosition);
+      setCarPos({ x: startPosition.x + 7, z: startPosition.z - 2 });
+      setCarTelemetry({ speed: 0, fuel: FUEL_TANK_LITERS, surface: "Асфальт", wear: 20 });
+      setMapWaypoint({ x: 3650, z: 112, label: "Продуктовая база · первый груз" });
+      flash("Карьера перевозчика: УАЗ Профи, 10 000 ₽ и пять доступных заказов");
+    } else {
+      flash("Карьера менеджера: найдите первых клиентов в Первореченском");
+    }
+    setMode("world");
+    window.setTimeout(() => persistRef.current(), 0);
+  };
+
+  const inventorySlotsUsed = (stacks: InventoryStack[]) =>
+    stacks.reduce((sum, stack) => sum + INVENTORY_ITEMS[stack.id].slots * stack.amount, 0);
+  const inventoryWeight = (stacks: InventoryStack[]) =>
+    stacks.reduce((sum, stack) => sum + INVENTORY_ITEMS[stack.id].weight * stack.amount, 0);
+  const transferInventoryItem = (id: InventoryItemId, toTrunk: boolean) => {
+    if (!currentVehicleRef.current) return flash("Рядом нет личного автомобиля");
+    const source = toTrunk ? inventoryRef.current : trunkInventoryRef.current;
+    const destination = toTrunk ? trunkInventoryRef.current : inventoryRef.current;
+    const sourceStack = source.find((stack) => stack.id === id);
+    if (!sourceStack?.amount) return;
+    if (!toTrunk && inventorySlotsUsed(destination) + INVENTORY_ITEMS[id].slots > 10) return flash("В рюкзаке нет свободных слотов");
+    const nextSource = sourceStack.amount === 1
+      ? source.filter((stack) => stack.id !== id)
+      : source.map((stack) => stack.id === id ? { ...stack, amount: stack.amount - 1 } : stack);
+    const nextDestination = destination.some((stack) => stack.id === id)
+      ? destination.map((stack) => stack.id === id ? { ...stack, amount: stack.amount + 1 } : stack)
+      : [...destination, { id, amount: 1 }];
+    if (toTrunk) {
+      inventoryRef.current = nextSource;
+      trunkInventoryRef.current = nextDestination;
+      setInventory(nextSource);
+      setTrunkInventory(nextDestination);
+    } else {
+      trunkInventoryRef.current = nextSource;
+      inventoryRef.current = nextDestination;
+      setTrunkInventory(nextSource);
+      setInventory(nextDestination);
+    }
+    persistRef.current();
+  };
+
+  const acceptFreightJob = (jobId: string) => {
+    const vehicle = currentVehicleRef.current ? VEHICLE_BY_ID[currentVehicleRef.current] : null;
+    const job = freightJobsRef.current.find((item) => item.id === jobId);
+    if (!job) return;
+    if (!vehicle?.commercial || (vehicle.cargo ?? 0) < job.volume) {
+      flash(`Нужен коммерческий транспорт вместимостью не менее ${job.volume} ед.`);
+      return;
+    }
+    const next = freightJobsRef.current.map((item) =>
+      item.id === jobId ? { ...item, status: "active" as FreightJobStatus, loaded: false } : item.status === "active" ? { ...item, status: "available" as FreightJobStatus, loaded: false } : item,
+    );
+    freightJobsRef.current = next;
+    setFreightJobs(next);
+    setMapWaypoint({ ...job.pickup, label: `Погрузка · ${job.pickup.label}` });
+    setMode("world");
+    flash(`Заказ принят: ${job.title}. Следуйте к месту погрузки.`);
+    persistRef.current();
+  };
+
+  const processFreightJob = () => {
+    const activeJob = freightJobsRef.current.find((job) => job.status === "active");
+    const car = engineRef.current.car;
+    if (!activeJob || !car || !currentVehicleRef.current) return flash("Нет активного грузового заказа");
+    const target = activeJob.loaded ? activeJob.delivery : activeJob.pickup;
+    if (Math.hypot(car.position.x - target.x, car.position.z - target.z) > 28) {
+      setMapWaypoint({ ...target, label: activeJob.loaded ? `Разгрузка · ${target.label}` : `Погрузка · ${target.label}` });
+      return flash(`Сначала прибудьте: ${target.label}`);
+    }
+    if (!activeJob.loaded) {
+      const next = freightJobsRef.current.map((job) => job.id === activeJob.id ? { ...job, loaded: true } : job);
+      freightJobsRef.current = next;
+      setFreightJobs(next);
+      setMapWaypoint({ ...activeJob.delivery, label: `Разгрузка · ${activeJob.delivery.label}` });
+      flash(`${activeJob.cargo} загружены · ${activeJob.volume} грузовых единиц`);
+    } else {
+      const nextMoney = moneyRef.current + activeJob.reward;
+      const nextCompleted = completedFreightJobsRef.current + 1;
+      const next = freightJobsRef.current.map((job) => job.id === activeJob.id ? { ...job, status: "completed" as FreightJobStatus } : job);
+      moneyRef.current = nextMoney;
+      freightJobsRef.current = next;
+      completedFreightJobsRef.current = nextCompleted;
+      setMoney(nextMoney);
+      setFreightJobs(next);
+      setCompletedFreightJobs(nextCompleted);
+      setReputation((value) => Math.min(100, value + 3));
+      setMapWaypoint(null);
+      flash(`Груз доставлен · +${activeJob.reward.toLocaleString("ru-RU")} ₽ · репутация +3`);
+    }
+    persistRef.current();
+  };
+
   function stopRadioStream(keepStatus = false) {
     if (radioReconnectTimerRef.current !== null) {
       window.clearTimeout(radioReconnectTimerRef.current);
@@ -4946,7 +5397,7 @@ export default function SecurityConsoleGame() {
         setRadioStreamStatus("Поток недоступен · включено офлайн-радио");
       }
     };
-    void stream.play().catch(() => setRadioStreamStatus("Нажмите «Включить эфир» ещё раз — браузер заблокировал запуск"));
+    void stream.play().catch(() => setRadioStreamStatus("Не удалось запустить: вероятно, это страница сайта. Нужна прямая ссылка вида /stream, .mp3, .aac или .ogg"));
   }
 
   const selectLocalRadio = (station: string) => {
@@ -5090,7 +5541,7 @@ export default function SecurityConsoleGame() {
           </div>
           <div className="hero-card">
             <div className={`hero-avatar ${profile.avatar}`}>{profile.nickname.slice(0, 1).toUpperCase()}</div>
-            <div><strong>{profile.nickname}</strong><small>Основатель · уровень {Math.max(1, Math.floor(reputation / 10) + 1)}</small></div>
+            <div><strong>{profile.nickname}</strong><small>{careerRole === "carrier" ? "Перевозчик" : "Основатель ЧОП"} · уровень {Math.max(1, Math.floor(reputation / 10) + 1)}</small></div>
             <span>Наблюдательность 1/5</span>
           </div>
           <div className="top-status">
@@ -5100,7 +5551,7 @@ export default function SecurityConsoleGame() {
             <div className="glass-chip"><span>Договоры</span><b>{totalContracts}</b></div>
           </div>
           <div className="energy-card">
-            <div className="energy-label"><span>Энергия менеджера</span><b>{energy}%</b></div>
+            <div className="energy-label"><span>Энергия героя</span><b>{energy}%</b></div>
             <div className="energy-track"><div className="energy-fill" style={{ width: `${energy}%` }} /></div>
             <small>{driving ? "За рулём" : `${movementState}${playerSpeedKmh > 0 ? ` · ${playerSpeedKmh.toFixed(1)} км/ч` : ""} · ${walkSurface}`}{energy < 20 ? " · усталость" : ""}</small>
           </div>
@@ -5118,7 +5569,7 @@ export default function SecurityConsoleGame() {
             {driving ? (
               <><kbd>WASD</kbd> вести <kbd>Space</kbd> ручник <kbd>ПКМ</kbd> осмотреться <kbd>E</kbd> выйти</>
             ) : (
-              <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>Tab</kbd> карта <kbd>P</kbd> планшет <kbd>O</kbd> телефон</>
+              <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>I</kbd> инвентарь <kbd>Tab</kbd> карта <kbd>P</kbd> планшет <kbd>O</kbd> телефон</>
             )}
           </div>
           <div className="route-card">
@@ -5134,6 +5585,10 @@ export default function SecurityConsoleGame() {
               return <div key={progress.id}><b>📋 {definition.title}</b><span>• {definition.short} · {value}/{target}</span></div>;
             })}
           </div>
+          {freightJobs.find((job) => job.status === "active") && (() => {
+            const job = freightJobs.find((item) => item.status === "active")!;
+            return <div className="freight-hud"><b>▦ {job.title}</b><span>{job.loaded ? `Доставить: ${job.delivery.label}` : `Загрузить: ${job.pickup.label}`}</span><small>{job.volume} ед. · награда {job.reward.toLocaleString("ru-RU")} ₽</small></div>;
+          })()}
           {trafficIncident && <div className="traffic-incident"><b>{trafficIncident.title}</b><span>{trafficIncident.detail}</span><strong>{trafficIncident.fine > 0 ? `−${trafficIncident.fine.toLocaleString("ru-RU")} ₽` : "Без штрафа"}</strong></div>}
           <div className="daily-hud">
             {dailyChallenges.activeChallenges.filter((challenge) => challenge.tracked && !challenge.claimed).slice(0, 2).map((challenge) => {
@@ -5225,7 +5680,7 @@ export default function SecurityConsoleGame() {
             </header>
             <div className="phone-titlebar">
               {phoneApp !== "home" ? <button onClick={() => setPhoneApp("home")}>‹</button> : <span />}
-              <div><small>Смартфон Алексея</small><b>{phoneApp === "home" ? "Главный экран" : phoneApp === "taxi" ? "Такси" : phoneApp === "contacts" ? "Контакты" : phoneApp === "notifications" ? "Уведомления" : phoneApp === "camera" ? "Камера" : phoneApp === "radio" ? "Радио и музыка" : phoneApp === "notes" ? "Заметки" : "Настройки"}</b></div>
+              <div><small>Смартфон Алексея</small><b>{phoneApp === "home" ? "Главный экран" : phoneApp === "taxi" ? "Такси" : phoneApp === "freight" ? "Грузоперевозки" : phoneApp === "contacts" ? "Контакты" : phoneApp === "notifications" ? "Уведомления" : phoneApp === "camera" ? "Камера" : phoneApp === "radio" ? "Радио и музыка" : phoneApp === "notes" ? "Заметки" : "Настройки"}</b></div>
               <button onClick={() => setMode("world")}>×</button>
             </div>
             <div className="phone-screen">
@@ -5235,6 +5690,7 @@ export default function SecurityConsoleGame() {
                   <div className="phone-app-grid">
                     {([
                       ["taxi", "🚕", "Такси"],
+                      ["freight", "▦", "Грузы"],
                       ["contacts", "👤", "Контакты"],
                       ["notifications", "🔔", "Сигналы"],
                       ["camera", "📷", "Камера"],
@@ -5267,6 +5723,21 @@ export default function SecurityConsoleGame() {
                   </div>
                   <div className="taxi-order"><span>≈ {taxiDistanceKm.toFixed(2)} км</span><b>{taxiPreviewPrice.toLocaleString("ru-RU")} ₽</b><button onClick={requestTaxi}>Вызвать такси</button></div>
                   <p>{taxiStatus}</p>
+                </div>
+              )}
+              {phoneApp === "freight" && (
+                <div className="phone-page freight-app">
+                  <div className="freight-summary"><span>Карьера: <b>{careerRole === "carrier" ? "перевозчик" : "менеджер"}</b></span><span>Выполнено: <b>{completedFreightJobs}</b></span></div>
+                  {freightJobs.map((job) => (
+                    <article className={`freight-card ${job.status}`} key={job.id}>
+                      <div><small>{job.cargo} · {job.volume} ед.</small><b>{job.title}</b><span>{job.pickup.label} → {job.delivery.label}</span></div>
+                      <strong>{job.reward.toLocaleString("ru-RU")} ₽</strong>
+                      {job.status === "available" && <button onClick={() => acceptFreightJob(job.id)}>Взять заказ</button>}
+                      {job.status === "active" && <button onClick={processFreightJob}>{job.loaded ? "Разгрузить" : "Загрузить"}</button>}
+                      {job.status === "completed" && <em>Доставлено</em>}
+                    </article>
+                  ))}
+                  <small>Для заказа нужен коммерческий автомобиль подходящей вместимости. Погрузка и разгрузка доступны рядом с отмеченной точкой.</small>
                 </div>
               )}
               {phoneApp === "contacts" && (
@@ -5302,7 +5773,7 @@ export default function SecurityConsoleGame() {
                     <input value={customRadioUrl} inputMode="url" placeholder="https://radio.example/stream.mp3" onChange={(event) => { customRadioUrlRef.current = event.target.value; setCustomRadioUrl(event.target.value); }} />
                     <button onClick={() => startRadioStream()}>Включить эфир</button>
                     <small>{radioStreamStatus}</small>
-                    <em>Используйте только поток, который разрешено воспроизводить в игре. При обрыве выполняются три попытки, затем включается офлайн-радио.</em>
+                    <em>Ссылка на обычную веб-страницу станции не подойдёт: нужен адрес самого аудиопотока, обычно содержащий /stream или заканчивающийся на .mp3, .aac либо .ogg.</em>
                   </section>
                   <button className="radio-toggle" onClick={() => { ensureAudio(); setRadioPlaying((value) => !value); }}>{radioPlaying ? "Поставить на паузу" : "Продолжить воспроизведение"}</button>
                 </div>
@@ -5338,6 +5809,34 @@ export default function SecurityConsoleGame() {
               )}
             </div>
             <footer className="phone-homebar"><button onClick={() => setPhoneApp("home")} aria-label="На главный экран" /></footer>
+          </div>
+        </section>
+      )}
+
+      {mode === "inventory" && (
+        <section className="overlay inventory-overlay">
+          <div className="inventory-shell">
+            <header><div><small>Рюкзак и багажник</small><h1>Инвентарь Алексея</h1></div><button onClick={() => setMode("world")}>×</button></header>
+            <div className="inventory-stats">
+              <span>Рюкзак <b>{inventorySlotsUsed(inventory)} / 10 слотов</b></span>
+              <span>Вес <b>{inventoryWeight(inventory).toFixed(1)} / 10 кг</b></span>
+              <span>Транспорт <b>{currentVehicle ? VEHICLE_BY_ID[currentVehicle].name : "нет автомобиля"}</b></span>
+            </div>
+            <div className="inventory-columns">
+              <article>
+                <h2>Рюкзак</h2>
+                <div className="inventory-grid">
+                  {inventory.length ? inventory.map((stack) => <button key={stack.id} onClick={() => transferInventoryItem(stack.id, true)}><i>{INVENTORY_ITEMS[stack.id].icon}</i><b>{INVENTORY_ITEMS[stack.id].name}</b><span>×{stack.amount} · в багажник →</span></button>) : <p>Рюкзак пуст.</p>}
+                </div>
+              </article>
+              <article>
+                <h2>Багажник · {currentVehicle ? `${VEHICLE_BY_ID[currentVehicle].cargo ?? 100} ед.` : "закрыт"}</h2>
+                <div className="inventory-grid">
+                  {trunkInventory.length ? trunkInventory.map((stack) => <button key={stack.id} onClick={() => transferInventoryItem(stack.id, false)}><i>{INVENTORY_ITEMS[stack.id].icon}</i><b>{INVENTORY_ITEMS[stack.id].name}</b><span>← забрать · ×{stack.amount}</span></button>) : <p>В багажнике нет мелких предметов.</p>}
+                </div>
+              </article>
+            </div>
+            <footer><span>I / Esc · закрыть</span><button onClick={() => setMode("world")}>Вернуться в мир</button></footer>
           </div>
         </section>
       )}
@@ -5441,7 +5940,8 @@ export default function SecurityConsoleGame() {
             <h1>Пульт <em>охраны</em></h1>
             <p>Алексей приехал в Первореченское рейсовым автобусом — без личной машины, но с 15 000 ₽ и планом открыть охранное предприятие. Первые маршруты предстоит пройти пешком или проехать на автобусе №21.</p>
             <div className="intro-actions">
-              <button className="primary-btn" onClick={() => setMode("world")}>Выйти в посёлок →</button>
+              <button className="primary-btn" onClick={() => startCareer("manager")}>Начать карьеру менеджера →</button>
+              <button className="soft-btn carrier-career" onClick={() => startCareer("carrier")}>Начать карьеру перевозчика · УАЗ Профи</button>
               <button className="soft-btn" onClick={() => startOffice(true)}>Демо пульта</button>
               <button className="soft-btn" onClick={() => setMode("network")}>Сетевая игра · до 4 игроков</button>
             </div>
@@ -5449,10 +5949,10 @@ export default function SecurityConsoleGame() {
           <aside className="intro-card">
             <div className="mission-ticket">
               <small>Задача на сегодня · 08:15</small>
-              <h3>Старт без автомобиля</h3>
-              <div className="mission-step"><i>1</i><span>Осмотритесь и найдите ближайшую остановку</span></div>
-              <div className="mission-step"><i>2</i><span>Заключайте договоры пешком или ездите автобусом</span></div>
-              <div className="mission-step"><i>3</i><span>Накопите 20 000 ₽ и купите первые колёса</span></div>
+              <h3>Две карьеры — один мир</h3>
+              <div className="mission-step"><i>1</i><span>Менеджер начинает без машины и развивает охрану</span></div>
+              <div className="mission-step"><i>2</i><span>Перевозчик получает УАЗ Профи и заказы промзоны</span></div>
+              <div className="mission-step"><i>3</i><span>Обе карьеры могут открыть второй вид бизнеса</span></div>
             </div>
           </aside>
         </section>
@@ -5804,7 +6304,7 @@ export default function SecurityConsoleGame() {
                     return <article key={vehicle.id} className={`${owned ? "owned" : ""} ${currentVehicle === vehicle.id ? "active" : ""}`}>
                       <div className={`vehicle-silhouette vehicle-${vehicle.id}`}><i /><span /></div>
                       <small>{vehicle.className}</small><h3>{vehicle.name}</h3><p>{vehicle.description}</p>
-                      <div className="vehicle-specs"><span>{vehicle.maxSpeed} км/ч</span><span>{vehicle.fuelUse} л/100 км</span><span>{vehicle.capacity} мест</span></div>
+                      <div className="vehicle-specs"><span>{vehicle.maxSpeed} км/ч</span><span>{vehicle.fuelUse} л/100 км</span><span>{vehicle.commercial ? `${vehicle.cargo} груз. ед.` : `${vehicle.capacity} мест`}</span></div>
                       <b>{vehicle.price.toLocaleString("ru-RU")} ₽ <small>· б/у {vehicle.usedPrice.toLocaleString("ru-RU")} ₽</small></b>
                       <div><button onClick={() => buyVehicle(vehicle)}>{owned ? currentVehicle === vehicle.id ? "Выбрано" : "Выбрать" : "Купить новую"}</button>{!owned && <button onClick={() => buyVehicle(vehicle, true)}>Купить б/у</button>}</div>
                     </article>;
@@ -5829,6 +6329,7 @@ export default function SecurityConsoleGame() {
                   <article><i>⚒</i><small>Инструменты</small><h2>Монтажный набор</h2><p>Запас крепежа и инструментов на пять установок.</p><button onClick={() => buyStoreItem("tools")}>Купить · 3 000 ₽</button></article>
                   <article><i>☕</i><small>Кафе</small><h2>Обед и кофе</h2><p>Восстанавливает 20 единиц энергии.</p><button onClick={() => buyStoreItem("food")}>Заказать · 100 ₽</button></article>
                   <article><i>▤</i><small>Книжный магазин</small><h2>Продажи и безопасность</h2><p>Учебная литература повышает репутацию.</p><button onClick={() => buyStoreItem("book")}>Книга · 2 000 ₽</button></article>
+                  <article><i>◔</i><small>Зоотовары</small><h2>Корм для животных</h2><p>Помогает в заданиях с питомцами и фермерской живностью.</p><div><button onClick={() => buyStoreItem("catFood")}>Кошачий · 120 ₽</button><button onClick={() => buyStoreItem("dogFood")}>Собачий · 160 ₽</button><button onClick={() => buyStoreItem("grain")}>Зерно · 90 ₽</button></div></article>
                 </div>
                 <h2>Рекламное агентство</h2>
                 <div className="advertising-row"><button onClick={() => buyStoreItem("leaflets")}>Листовки · 500 ₽</button><button onClick={() => buyStoreItem("radio")}>Радио‑ролик · 3 000 ₽</button><button onClick={() => buyStoreItem("billboard")}>Рекламный щит · 10 000 ₽</button></div>
