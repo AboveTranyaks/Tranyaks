@@ -372,6 +372,7 @@ test("adds the carrier career, industrial logistics, inventory, and wildlife", a
   assert.match(source, /processFreightJob/);
   assert.match(source, /ПРОДУКТОВАЯ БАЗА/);
   assert.match(source, /СКЛАД СПЕКТР/);
+  assert.match(source, /const board = new THREE\.Mesh\([\s\S]*map: makeTextBoard\(building\.label/);
   assert.match(source, /function makeWildlife/);
   assert.match(source, /\[WildlifeManager\]/);
   assert.match(source, /setReputation\(\(value\) => Math\.max\(0, value - 15\)\)/);
