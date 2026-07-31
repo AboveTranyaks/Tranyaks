@@ -3120,6 +3120,15 @@ kbd {
   line-height: 1.4;
 }
 
+.stream-radio .stream-radio-status {
+  min-height: 31px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: #eef7d7;
+  background: rgba(204, 232, 107, 0.12);
+  font-weight: 800;
+}
+
 .stream-radio em {
   font-style: normal;
   opacity: 0.78;
