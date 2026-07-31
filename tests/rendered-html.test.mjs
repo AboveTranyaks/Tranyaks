@@ -249,7 +249,7 @@ test("adds a persistent smartphone, street conversations, and scalable interface
     readFile(stylesUrl, "utf8"),
   ]);
 
-  assert.match(source, /type PhoneApp = "home" \| "taxi" \| "contacts"/);
+  assert.match(source, /type PhoneApp = "home" \| "taxi" \| "freight" \| "contacts"/);
   assert.match(source, /e\.code === "KeyO"/);
   assert.match(source, /gamepad\?\.buttons\[12\]\?\.pressed/);
   assert.match(source, /modeRef\.current === "world" \|\| modeRef\.current === "phone"/);
@@ -334,7 +334,8 @@ test("supports licensed custom radio streams with resilient offline fallback and
   assert.match(source, /Нужна прямая HTTPS-ссылка/);
   assert.match(source, /attempt < 2/);
   assert.match(source, /Поток недоступен · включено офлайн-радио/);
-  assert.match(source, /Используйте только поток, который разрешено воспроизводить в игре/);
+  assert.match(source, /ссылка вида \/stream, \.mp3, \.aac или \.ogg/);
+  assert.match(source, /Ссылка на обычную веб-страницу станции не подойдёт/);
   assert.match(source, /vehicleEngine: OscillatorNode/);
   assert.match(source, /activeAudio\.vehicleEngine\.frequency\.setTargetAtTime/);
   assert.match(source, /playVehicleHorn/);
@@ -352,4 +353,29 @@ test("populates Dinskaya with thirty street NPCs and public landmarks", async ()
   assert.match(source, /addDinskayaBuilding\(3970, -98/);
   assert.match(source, /addDinskayaBuilding\(4055, -98/);
   assert.match(source, /addStreetBench\(4080, 108/);
+});
+
+test("adds the carrier career, industrial logistics, inventory, and wildlife", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(sourceUrl, "utf8"),
+    readFile(stylesUrl, "utf8"),
+  ]);
+
+  assert.match(source, /type CareerRole = "manager" \| "carrier"/);
+  assert.match(source, /const DEFAULT_FREIGHT_JOBS: FreightJob\[]/);
+  assert.match(source, /id: "uaz_profi"[\s\S]*cargo: 400[\s\S]*commercial: true/);
+  assert.match(source, /id: "gazelle_box"[\s\S]*id: "gazelle_flatbed"[\s\S]*id: "kamaz"[\s\S]*id: "reefer"[\s\S]*id: "dumptruck"/);
+  assert.match(source, /const startCareer = \(role: CareerRole\)/);
+  assert.match(source, /Начать карьеру перевозчика/);
+  assert.match(source, /e\.code === "KeyI"/);
+  assert.match(source, /transferInventoryItem/);
+  assert.match(source, /processFreightJob/);
+  assert.match(source, /ПРОДУКТОВАЯ БАЗА/);
+  assert.match(source, /СКЛАД СПЕКТР/);
+  assert.match(source, /function makeWildlife/);
+  assert.match(source, /\[WildlifeManager\]/);
+  assert.match(source, /setReputation\(\(value\) => Math\.max\(0, value - 15\)\)/);
+  assert.match(styles, /\.carrier-career/);
+  assert.match(styles, /\.freight-app/);
+  assert.match(styles, /\.inventory-overlay/);
 });

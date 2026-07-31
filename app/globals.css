@@ -3903,3 +3903,177 @@ kbd {
 .alarm-card .alarm-countdown.urgent { color: #a82419; background: #ffd3ca !important; }
 .alarm-card .alarm-action.danger { color: #9f3024; border-color: #c95e4d; background: #fff8f5; }
 .alarm-card .alarm-action.danger:hover { color: #fff; background: #b94031; }
+
+.carrier-career {
+  border-color: #e0a744 !important;
+  color: #263e35 !important;
+  background: #f3d38b !important;
+}
+
+.freight-hud {
+  position: fixed;
+  z-index: 13;
+  top: 236px;
+  left: 28px;
+  display: grid;
+  max-width: 310px;
+  gap: 4px;
+  padding: 13px 16px;
+  border-left: 4px solid #e4a643;
+  border-radius: 0 14px 14px 0;
+  background: rgba(30, 57, 48, 0.92);
+  color: #f8f5e9;
+  box-shadow: 0 12px 32px rgba(20, 40, 33, 0.22);
+}
+
+.freight-hud b { color: #f2c66f; }
+.freight-hud span { font-size: 13px; }
+.freight-hud small { color: #bdcec5; }
+
+.freight-app {
+  display: grid;
+  gap: 10px;
+}
+
+.freight-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(220, 167, 73, 0.18);
+  font-size: 12px;
+}
+
+.freight-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 10px;
+  padding: 12px;
+  border: 1px solid rgba(221, 231, 222, 0.16);
+  border-radius: 13px;
+  background: rgba(10, 25, 20, 0.56);
+}
+
+.freight-card > div {
+  display: grid;
+  gap: 3px;
+}
+
+.freight-card > div span,
+.freight-card > div small { color: #b8c9c0; font-size: 10px; }
+.freight-card > strong { color: #f0c66d; }
+.freight-card button {
+  grid-column: 1 / -1;
+  padding: 9px;
+  border: 0;
+  border-radius: 9px;
+  background: #cbee58;
+  color: #20392f;
+  font-weight: 900;
+}
+.freight-card.active { border-color: #e4a643; }
+.freight-card.completed { opacity: 0.62; }
+.freight-card em { grid-column: 1 / -1; color: #aee589; font-style: normal; font-weight: 800; }
+
+.inventory-overlay {
+  z-index: 58;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 41, 34, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.inventory-shell {
+  width: min(1040px, 96vw);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #536e63;
+  border-radius: 24px;
+  background: #f2efe2;
+  color: #243a32;
+  box-shadow: 0 28px 80px rgba(11, 27, 22, 0.4);
+}
+
+.inventory-shell > header,
+.inventory-shell > footer,
+.inventory-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inventory-shell > header button {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 50%;
+  background: #315c45;
+  color: white;
+  font-size: 24px;
+}
+
+.inventory-stats {
+  margin: 18px 0;
+  padding: 13px 16px;
+  border-radius: 14px;
+  background: #e3e6d8;
+}
+
+.inventory-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.inventory-columns > article {
+  min-height: 300px;
+  padding: 18px;
+  border: 1px solid #d3d8cc;
+  border-radius: 18px;
+  background: #faf8ef;
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.inventory-grid button {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 3px 10px;
+  padding: 12px;
+  border: 1px solid #d5dbcf;
+  border-radius: 12px;
+  background: white;
+  color: #243a32;
+  text-align: left;
+}
+
+.inventory-grid button i {
+  grid-row: span 2;
+  font-size: 26px;
+  font-style: normal;
+}
+
+.inventory-grid button span { color: #6b776f; font-size: 11px; }
+.inventory-shell > footer { margin-top: 18px; color: #67756d; }
+.inventory-shell > footer button {
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: #315c45;
+  color: white;
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .inventory-columns { grid-template-columns: 1fr; }
+  .inventory-stats { display: grid; }
+  .freight-hud { display: none; }
+}
