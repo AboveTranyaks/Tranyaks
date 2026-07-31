@@ -284,6 +284,7 @@ type Walker = {
   speed: number;
   personalReputation: number;
   stationary?: boolean;
+  workSchedule?: "day" | "night";
 };
 
 type TrafficVehicle = {
@@ -505,7 +506,8 @@ const INVENTORY_ITEMS: Record<InventoryItemId, { name: string; slots: number; we
 const DEFAULT_FREIGHT_JOBS: FreightJob[] = [
   { id: "fresh-food", title: "Свежие продукты", cargo: "Овощи и молочная продукция", volume: 180, pickup: { label: "Продуктовая база", x: 3650, z: 112 }, delivery: { label: "Супермаркет «Динской»", x: 3995, z: -24 }, reward: 1400, deadlineHours: 4, status: "available", loaded: false },
   { id: "electronics", title: "Камеры для магазина", cargo: "Камеры, датчики и провода", volume: 120, pickup: { label: "Склад «Спектр»", x: 3710, z: 112 }, delivery: { label: "Магазин электроники", x: 4058, z: 44 }, reward: 1700, deadlineHours: 5, status: "available", loaded: false },
-  { id: "building", title: "Материалы на стройку", cargo: "Кирпичи и цемент", volume: 460, pickup: { label: "Склад хозтоваров", x: 3680, z: 145 }, delivery: { label: "Стройка в Первореченском", x: -112, z: 118 }, reward: 3600, deadlineHours: 8, status: "available", loaded: false },
+  { id: "building", title: "Стройка века", cargo: "3 паллеты кирпича, 2 цемента и 1 арматура", volume: 600, pickup: { label: "Склад хозтоваров", x: 3680, z: 145 }, delivery: { label: "Стройка в Первореченском", x: -112, z: 122 }, reward: 5000, deadlineHours: 8, status: "available", loaded: false },
+  { id: "urgent-generator", title: "Срочный рейс", cargo: "Генератор и кабель", volume: 340, pickup: { label: "Грузовой сервис", x: 3598, z: 146 }, delivery: { label: "Стройплощадка Динской", x: 3820, z: 132 }, reward: 4200, deadlineHours: 3, status: "available", loaded: false },
   { id: "market", title: "Фермерский рейс", cargo: "Ящики с овощами", volume: 260, pickup: { label: "Ферма Динской", x: 4125, z: 142 }, delivery: { label: "Открытый рынок", x: 3970, z: -98 }, reward: 2100, deadlineHours: 6, status: "available", loaded: false },
   { id: "furniture", title: "Переезд Петровых", cargo: "Шкаф и домашняя мебель", volume: 380, pickup: { label: "Озёрная улица", x: 4080, z: -132 }, delivery: { label: "Новый дом", x: 1350, z: 116 }, reward: 2900, deadlineHours: 7, status: "available", loaded: false },
 ];
@@ -548,6 +550,46 @@ const QUESTS = [
     full: "Семён согласен испытать систему, если Алексей лично проверит гараж и привезёт комплект датчиков.",
     reward: "2 000 ₽ · гаечный ключ · +5 репутации",
     target: { x: -48, z: 20, label: "Гараж Семёна Петровича" },
+  },
+  {
+    id: "quest_construction_century",
+    category: "side" as QuestCategory,
+    icon: "◆",
+    title: "Стройка века",
+    short: "Доставить кирпич, цемент и арматуру на расширение сельской школы.",
+    full: "Прораб Иван Степанович ждёт три паллеты кирпича, две партии цемента и арматуру со склада в промзоне Динской.",
+    reward: "5 000 ₽ · скидка на стройматериалы · +10 репутации",
+    target: { x: -112, z: 122, label: "Стройплощадка Первореченского" },
+  },
+  {
+    id: "quest_night_construction",
+    category: "side" as QuestCategory,
+    icon: "!",
+    title: "Ночная охрана",
+    short: "Заключить премиум-контракт на охрану стройплощадки.",
+    full: "Дорогая техника остаётся без присмотра после 20:00. Установите датчики движения и видеонаблюдение.",
+    reward: "Премиум-контракт · рекомендации прораба · +15 репутации",
+    target: { x: 3820, z: 132, label: "Стройплощадка Динской" },
+  },
+  {
+    id: "quest_missing_drill",
+    category: "dynamic" as QuestCategory,
+    icon: "⚡",
+    title: "Пропавший инструмент",
+    short: "Найти исчезнувший перфоратор и опросить рабочих.",
+    full: "После обеденного перерыва из бытовки пропал перфоратор. Поговорите с прорабом, рабочими и водителем.",
+    reward: "2 500 ₽ · +6 репутации",
+    target: { x: -112, z: 122, label: "Бытовка прораба" },
+  },
+  {
+    id: "quest_urgent_generator",
+    category: "dynamic" as QuestCategory,
+    icon: "⚡",
+    title: "Срочный рейс",
+    short: "Привезти генератор на стройку после отключения света.",
+    full: "На объекте остановились бетонные работы. Заберите генератор в грузовом сервисе и доставьте его до окончания смены.",
+    reward: "4 200 ₽ · +5 репутации",
+    target: { x: 3820, z: 132, label: "Стройплощадка Динской" },
   },
   {
     id: "quest_false_alarm_wave",
@@ -2824,6 +2866,11 @@ export default function SecurityConsoleGame() {
     const windowMaterials: THREE.MeshStandardMaterial[] = [];
     const lampMaterials: THREE.MeshStandardMaterial[] = [];
     const headlightMaterials: THREE.MeshStandardMaterial[] = [];
+    const constructionCranes: THREE.Group[] = [];
+    const constructionMixers: THREE.Mesh[] = [];
+    const constructionExcavatorArms: THREE.Group[] = [];
+    const constructionWorkers: THREE.Group[] = [];
+    const constructionLights: THREE.MeshStandardMaterial[] = [];
 
     engine.colliders = [];
     engine.walkers = [];
@@ -3004,10 +3051,14 @@ export default function SecurityConsoleGame() {
     });
 
     const houseColors = [0xe1b47d, 0xd89073, 0xd6c98a, 0x8eaf9a, 0xc7a3a3, 0x9bb8c2];
+    const constructionAreas = [
+      { x: -112, z: 122, halfX: 27, halfZ: 23 },
+      { x: 3820, z: 132, halfX: 27, halfZ: 23 },
+    ];
     const addNeighbourhood = (centreX: number, count: number, startIndex: number) => {
       const candidates: [number, number][] = [];
       const columns = [-145, -116, -87, -58, -29, 0, 29, 58, 87, 116, 145];
-      const rows = [-150, -116, -84, -42, 42, 84, 116, 150];
+      const rows = [150, -150, 116, -116, 84, -84, 42, -42];
       for (const z of rows) {
         for (const localX of columns) candidates.push([centreX + localX, z]);
       }
@@ -3015,7 +3066,11 @@ export default function SecurityConsoleGame() {
       for (const [x, z] of candidates) {
         if (added >= count) break;
         const overlapsLead = houses.some(([hx, hz]) => Math.hypot(x - hx, z - hz) < 15);
+        const overlapsConstruction = constructionAreas.some((area) =>
+          Math.abs(x - area.x) < area.halfX + 7 && Math.abs(z - area.z) < area.halfZ + 7,
+        );
         if (centreX === 0 && overlapsLead) continue;
+        if (overlapsConstruction) continue;
         const house = makeHouse(scene, x, z, houseColors[(startIndex + added) % houseColors.length], false);
         house.traverse((part) => {
           if (part instanceof THREE.Mesh && part.name === "window" && part.material instanceof THREE.MeshStandardMaterial) {
@@ -3027,10 +3082,195 @@ export default function SecurityConsoleGame() {
         added += 1;
       }
     };
-    addNeighbourhood(0, 15, 10);
+    addNeighbourhood(0, 28, 10);
     addNeighbourhood(1350, 25, 25);
     addNeighbourhood(2700, 25, 50);
     addNeighbourhood(4000, 25, 75);
+
+    const addConstructionSite = (
+      title: string,
+      x: number,
+      z: number,
+      accent: number,
+      npcBaseId: number,
+      foremanName: string,
+    ) => {
+      box(scene, [48, 0.16, 36], [x, 0.1, z], 0xbba47e);
+      box(scene, [17, 0.42, 11], [x - 7, 0.28, z + 5], 0x96958c);
+      box(scene, [15, 3.2, 0.7], [x - 7, 1.7, z + 10], 0xb96c4d);
+      box(scene, [0.7, 3.2, 10], [x - 14.2, 1.7, z + 5], 0xb96c4d);
+      for (const scaffoldX of [x - 15.5, x - 10, x - 4.5, x + 1]) {
+        box(scene, [0.16, 7.2, 0.16], [scaffoldX, 3.6, z - 1], 0x5b6462);
+        box(scene, [0.16, 7.2, 0.16], [scaffoldX, 3.6, z + 11], 0x5b6462);
+      }
+      for (const level of [1.8, 4.1, 6.4]) {
+        box(scene, [17, 0.14, 0.18], [x - 7, level, z - 1], 0x5b6462);
+        box(scene, [17, 0.14, 0.18], [x - 7, level, z + 11], 0x5b6462);
+      }
+
+      const fenceColor = 0x797f7b;
+      box(scene, [48, 1.7, 0.18], [x, 0.9, z + 18], fenceColor);
+      box(scene, [17, 1.7, 0.18], [x - 15.5, 0.9, z - 18], fenceColor);
+      box(scene, [17, 1.7, 0.18], [x + 15.5, 0.9, z - 18], fenceColor);
+      box(scene, [0.18, 1.7, 36], [x - 24, 0.9, z], fenceColor);
+      box(scene, [0.18, 1.7, 36], [x + 24, 0.9, z], fenceColor);
+      engine.colliders.push(
+        { x, z: z + 18, halfX: 24, halfZ: 0.25, kind: "landmark" },
+        { x: x - 15.5, z: z - 18, halfX: 8.5, halfZ: 0.25, kind: "landmark" },
+        { x: x + 15.5, z: z - 18, halfX: 8.5, halfZ: 0.25, kind: "landmark" },
+        { x: x - 24, z, halfX: 0.25, halfZ: 18, kind: "landmark" },
+        { x: x + 24, z, halfX: 0.25, halfZ: 18, kind: "landmark" },
+      );
+      for (let post = -22; post <= 22; post += 4) {
+        box(scene, [0.14, 2.2, 0.14], [x + post, 1.1, z + 17.8], 0x424a47);
+      }
+
+      const siteSign = makeReadableTextSign(
+        makeTextBoard(title, 720, 110, "#f3ead6", "#354a40"),
+        12,
+        1.8,
+      );
+      siteSign.position.set(x, 3.25, z - 17.8);
+      scene.add(siteSign);
+
+      box(scene, [11, 3.1, 5], [x - 17, 1.55, z - 10.5], 0xd2a969);
+      box(scene, [11.5, 0.42, 5.5], [x - 17, 3.25, z - 10.5], accent);
+      box(scene, [1.7, 2.25, 0.24], [x - 17, 1.18, z - 7.9], 0x5f493a);
+      box(scene, [2.2, 1.3, 0.24], [x - 20.1, 1.9, z - 7.9], 0x9ed4dc);
+
+      const crane = new THREE.Group();
+      crane.position.set(x + 13, 0, z + 6);
+      const mast = new THREE.Mesh(new THREE.BoxGeometry(0.75, 18, 0.75), mat(0xe6b23f));
+      mast.position.y = 9;
+      const boom = new THREE.Group();
+      boom.position.y = 17.7;
+      const boomBeam = new THREE.Mesh(new THREE.BoxGeometry(29, 0.38, 0.42), mat(0xe6b23f));
+      boomBeam.position.x = -1.5;
+      const counterWeight = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.8, 1.8), mat(0x585a56));
+      counterWeight.position.x = -12;
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2, 2.2), mat(0x789aa0));
+      cabin.position.set(0.7, -1.1, 0);
+      const trolley = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.8), mat(0x424843));
+      trolley.position.x = 7;
+      const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 8, 5), mat(0x333b39));
+      cable.position.set(7, -4.2, 0);
+      const hook = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.1, 5, 8, Math.PI * 1.5), mat(0x343b38));
+      hook.position.set(7, -8.15, 0);
+      const beaconMaterial = new THREE.MeshStandardMaterial({
+        color: 0xe45e4b,
+        emissive: 0xff3b27,
+        emissiveIntensity: 0.2,
+      });
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 4), beaconMaterial);
+      beacon.position.set(0, 0.65, 0);
+      constructionLights.push(beaconMaterial);
+      boom.add(boomBeam, counterWeight, cabin, trolley, cable, hook, beacon);
+      crane.add(mast, boom);
+      crane.traverse((part) => {
+        if (part instanceof THREE.Mesh) part.castShadow = true;
+      });
+      scene.add(crane);
+      constructionCranes.push(boom);
+      engine.colliders.push({ x: x + 13, z: z + 6, halfX: 0.8, halfZ: 0.8, kind: "landmark" });
+
+      const excavator = new THREE.Group();
+      excavator.position.set(x + 12, 0, z - 8);
+      for (const trackX of [-1.1, 1.1]) {
+        const track = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.7, 3.8), mat(0x3f4542));
+        track.position.set(trackX, 0.45, 0);
+        excavator.add(track);
+      }
+      const excavatorBody = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.5, 2.7), mat(accent));
+      excavatorBody.position.y = 1.45;
+      const arm = new THREE.Group();
+      arm.position.set(0, 2.05, 0.8);
+      const armBeam = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 5.2), mat(accent));
+      armBeam.position.z = 2.35;
+      armBeam.rotation.x = -0.36;
+      const bucket = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.1, 1.25), mat(0x6b6254));
+      bucket.position.set(0, -0.75, 4.7);
+      arm.add(armBeam, bucket);
+      excavator.add(excavatorBody, arm);
+      scene.add(excavator);
+      constructionExcavatorArms.push(arm);
+      engine.colliders.push({ x: x + 12, z: z - 8, halfX: 2, halfZ: 2.6, kind: "landmark" });
+
+      const mixerBase = new THREE.Group();
+      mixerBase.position.set(x + 2, 0, z - 9);
+      const mixerStand = new THREE.Mesh(new THREE.BoxGeometry(3.8, 1.2, 2.5), mat(0x5f6662));
+      mixerStand.position.y = 0.7;
+      const mixer = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.55, 3.7, 9), mat(0xe6ddd0));
+      mixer.position.y = 2.2;
+      mixer.rotation.z = Math.PI / 2;
+      mixerBase.add(mixerStand, mixer);
+      scene.add(mixerBase);
+      constructionMixers.push(mixer);
+      engine.colliders.push({ x: x + 2, z: z - 9, halfX: 2.1, halfZ: 1.5, kind: "landmark" });
+
+      const dumpTruck = makeCar(0xb88745, true);
+      dumpTruck.scale.setScalar(0.82);
+      dumpTruck.position.set(x + 17, 0, z + 13);
+      dumpTruck.rotation.y = Math.PI;
+      const dumpBed = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.35, 3.4), mat(0x9b7142));
+      dumpBed.position.set(0, 2.0, 0.8);
+      dumpTruck.add(dumpBed);
+      scene.add(dumpTruck);
+      engine.colliders.push({ x: x + 17, z: z + 13, halfX: 2.5, halfZ: 3.2, kind: "landmark" });
+
+      for (const pileX of [x - 19, x - 14]) {
+        const pile = new THREE.Mesh(new THREE.ConeGeometry(2.2, 1.5, 9), mat(0xcab17d));
+        pile.position.set(pileX, 0.75, z + 13);
+        pile.castShadow = true;
+        scene.add(pile);
+      }
+      for (let pallet = 0; pallet < 3; pallet++) {
+        box(scene, [3.2, 0.35, 2.2], [x - 1 + pallet * 3.6, 0.25, z + 14], 0x866546);
+        for (let brick = 0; brick < 6; brick++) {
+          box(
+            scene,
+            [0.85, 0.42, 0.48],
+            [x - 2 + pallet * 3.6 + (brick % 3), 0.62 + Math.floor(brick / 3) * 0.42, z + 14],
+            0xa9563f,
+          );
+        }
+      }
+
+      const npcSpecs = [
+        { name: foremanName, dx: -5, dz: -14, color: 0x6e8390, marker: true },
+        { name: "Рабочий Виктор", dx: -10, dz: 4, color: 0xb4825d, marker: false },
+        { name: "Рабочий Павел", dx: -3, dz: 7, color: 0x758e68, marker: false },
+        { name: "Водитель самосвала", dx: 18, dz: 9, color: 0x8f6f59, marker: false },
+        { name: "Ночной охранник", dx: -20, dz: -13, color: 0x435e52, marker: false, night: true },
+      ];
+      npcSpecs.forEach((spec, index) => {
+        const worker = makePerson(spec.color);
+        worker.position.set(x + spec.dx, 0, z + spec.dz);
+        worker.rotation.y = spec.dz < 0 ? 0 : Math.PI;
+        if (spec.marker) {
+          const marker = new THREE.Mesh(new THREE.OctahedronGeometry(0.5, 0), mat(0xe6a83f));
+          marker.position.y = 5.4;
+          worker.add(marker);
+        }
+        scene.add(worker);
+        engine.walkers.push({
+          id: npcBaseId + index,
+          name: spec.name,
+          mesh: worker,
+          minX: worker.position.x,
+          maxX: worker.position.x,
+          laneZ: worker.position.z,
+          direction: 1,
+          speed: 0,
+          personalReputation: initialSave.streetReputation?.[npcBaseId + index] ?? 0,
+          stationary: true,
+          workSchedule: spec.night ? "night" : "day",
+        });
+        if (!spec.night && index > 0) constructionWorkers.push(worker);
+      });
+    };
+
+    addConstructionSite("РАСШИРЕНИЕ СЕЛЬСКОЙ ШКОЛЫ", -112, 122, 0xd9a442, 500, "Прораб Иван Степанович");
+    addConstructionSite("НОВЫЙ ЖИЛОЙ КОМПЛЕКС", 3820, 132, 0xc77b45, 520, "Прораб дядя Миша");
 
     // Центр посёлка: магазин, школа, остановка и детская площадка.
     box(scene, [15, 5.4, 10], [3, 2.7, -22], 0xe0b56f);
@@ -3452,7 +3692,7 @@ export default function SecurityConsoleGame() {
           homeX: seed.x,
           homeZ: seed.z,
           radius: seed.radius,
-          speed: seed.kind === "butterfly" ? 0.65 + (index % 3) * 0.12 : isFlockingBird ? 1.45 + (index % 4) * 0.16 : 0.28 + (index % 5) * 0.14,
+          speed: seed.kind === "butterfly" ? 0.65 + (index % 3) * 0.12 : isFlockingBird ? 2.9 + (index % 4) * 0.32 : 0.28 + (index % 5) * 0.14,
           phase: angle,
           flying: Boolean(seed.flying),
           frightenedUntil: 0,
@@ -3856,6 +4096,7 @@ export default function SecurityConsoleGame() {
         }
       }
       for (const walker of engine.walkers) {
+        if (!walker.mesh.visible) continue;
         if (Math.hypot(x - walker.mesh.position.x, z - walker.mesh.position.z) < radius + 0.72) {
           return true;
         }
@@ -4141,6 +4382,19 @@ export default function SecurityConsoleGame() {
       headlightMaterials.forEach((material) => {
         material.emissiveIntensity = 0.12 + nightGlow * 3.8;
       });
+      const constructionActive = engine.time >= 8 && engine.time < 20;
+      constructionCranes.forEach((crane, index) => {
+        if (constructionActive) crane.rotation.y += dt * (0.055 + index * 0.012);
+      });
+      constructionMixers.forEach((mixer, index) => {
+        if (constructionActive) mixer.rotation.y += dt * (0.8 + index * 0.15);
+      });
+      constructionExcavatorArms.forEach((arm, index) => {
+        arm.rotation.x = constructionActive ? -0.12 + Math.sin(now * 0.00065 + index) * 0.22 : -0.12;
+      });
+      constructionLights.forEach((material, index) => {
+        material.emissiveIntensity = nightGlow * (2.2 + Math.sin(now * 0.004 + index) * 0.8);
+      });
 
       engine.residents.forEach((resident, i) => {
         if (!resident.mesh) return;
@@ -4150,6 +4404,10 @@ export default function SecurityConsoleGame() {
         if (marker) marker.position.y = 5.7 + Math.sin(now * 0.003 + i) * 0.18;
       });
       engine.walkers.forEach((walker, i) => {
+        if (walker.workSchedule) {
+          walker.mesh.visible = walker.workSchedule === "day" ? constructionActive : !constructionActive;
+        }
+        if (!walker.mesh.visible) return;
         const talking = modeRef.current === "street" && activeStreetWalkerIdRef.current === walker.id;
         if (talking) {
           walker.mesh.rotation.y = Math.atan2(
@@ -4170,6 +4428,13 @@ export default function SecurityConsoleGame() {
         walker.mesh.position.z = walker.laneZ;
         walker.mesh.rotation.y = walker.direction > 0 ? Math.PI / 2 : -Math.PI / 2;
         personWalkCycle(walker.mesh, true, now, i * 0.7);
+      });
+      constructionWorkers.forEach((worker, index) => {
+        if (!constructionActive || !worker.visible) return;
+        const leftArm = worker.getObjectByName("leftArm");
+        const rightArm = worker.getObjectByName("rightArm");
+        if (leftArm) leftArm.rotation.x = -0.7 + Math.sin(now * 0.006 + index) * 0.55;
+        if (rightArm) rightArm.rotation.x = 0.45 - Math.sin(now * 0.006 + index) * 0.42;
       });
       birdFlocks.forEach((flock) => {
         const landingPoint = flock.landingPoints[flock.targetIndex];
@@ -4464,6 +4729,7 @@ export default function SecurityConsoleGame() {
         let closestWalker: Walker | null = null;
         let closestWalkerDistance = closest ? 3.1 : 4.4;
         for (const walker of engine.walkers) {
+          if (!walker.mesh.visible) continue;
           const distance = walker.mesh.position.distanceTo(player.position);
           if (distance < closestWalkerDistance) {
             closestWalker = walker;
@@ -5626,9 +5892,11 @@ export default function SecurityConsoleGame() {
   }
 
   function startRadioStream(urlOverride?: string, attempt = 0) {
-    const url = (urlOverride ?? customRadioUrlRef.current).trim();
+    const rawUrl = (urlOverride ?? customRadioUrlRef.current).trim();
+    const upgradedFromHttp = /^http:\/\//i.test(rawUrl);
+    const url = upgradedFromHttp ? rawUrl.replace(/^http:\/\//i, "https://") : rawUrl;
     if (!/^https:\/\/\S+$/i.test(url)) {
-      setRadioStreamStatus("Нужна прямая HTTPS-ссылка на MP3, AAC или OGG-поток");
+      setRadioStreamStatus("Введите прямую HTTP/HTTPS-ссылку на MP3, AAC или OGG-поток");
       return;
     }
     ensureAudio();
@@ -5638,9 +5906,16 @@ export default function SecurityConsoleGame() {
     setRadioMode("stream");
     setRadioStation("Интернет-эфир");
     setRadioPlaying(true);
-    setRadioStreamStatus(attempt ? `Повторное подключение ${attempt + 1}/3…` : "Подключение к эфиру…");
+    setRadioStreamStatus(
+      attempt
+        ? `Повторное подключение ${attempt + 1}/3…`
+        : upgradedFromHttp
+          ? "HTTP автоматически заменён на защищённый HTTPS · подключение…"
+          : "Подключение к эфиру…",
+    );
 
     const stream = new Audio();
+    stream.crossOrigin = "anonymous";
     stream.preload = "none";
     stream.src = url;
     stream.volume = clamp(
@@ -5675,7 +5950,14 @@ export default function SecurityConsoleGame() {
         setRadioStreamStatus("Поток недоступен · включено офлайн-радио");
       }
     };
-    void stream.play().catch(() => setRadioStreamStatus("Не удалось запустить: вероятно, это страница сайта. Нужна прямая ссылка вида /stream, .mp3, .aac или .ogg"));
+    stream.load();
+    void stream.play().catch((error: DOMException) => {
+      setRadioStreamStatus(
+        error.name === "NotAllowedError"
+          ? "Браузер заблокировал автозапуск · нажмите «Включить эфир» ещё раз"
+          : "Не удалось запустить: вероятно, это страница сайта. Нужна прямая ссылка вида /stream, .mp3, .aac или .ogg",
+      );
+    });
   }
 
   const selectLocalRadio = (station: string) => {
@@ -6047,10 +6329,10 @@ export default function SecurityConsoleGame() {
                   <div className={`radio-cover ${radioPlaying ? "playing" : ""}`}><i>♫</i><b>{radioStation}</b><span>{radioMode === "stream" ? radioStreamStatus : radioPlaying ? "Офлайн-эфир" : "Пауза"}</span></div>
                   {["Ретро FM", "Дорожное радио", "Вести посёлка", "Пультовая волна", "Lo‑Fi Beats"].map((station) => <button className={radioMode === "local" && radioStation === station ? "active" : ""} key={station} onClick={() => selectLocalRadio(station)}><b>{station}</b><span>{station === "Lo‑Fi Beats" ? "Оригинальный спокойный синтезированный фон" : station === "Вести посёлка" ? `Новости: ${locationName}, ${weather.toLowerCase()}` : station === "Пультовая волна" ? "Переговоры диспетчера и экипажей" : "Оригинальная музыкальная программа дороги"}</span></button>)}
                   <section className="stream-radio">
-                    <div><b>Свой интернет-эфир</b><span>Прямая лицензированная HTTPS-ссылка на MP3, AAC или OGG</span></div>
+                    <div><b>Свой интернет-эфир</b><span>Прямая лицензированная HTTP/HTTPS-ссылка на MP3, AAC или OGG. Небезопасный HTTP будет автоматически заменён на HTTPS.</span></div>
                     <input value={customRadioUrl} inputMode="url" placeholder="https://radio.example/stream.mp3" onChange={(event) => { customRadioUrlRef.current = event.target.value; setCustomRadioUrl(event.target.value); }} />
-                    <button onClick={() => startRadioStream()}>Включить эфир</button>
-                    <small>{radioStreamStatus}</small>
+                    <button type="button" onClick={() => startRadioStream()}>Включить эфир</button>
+                    <small className="stream-radio-status" role="status" aria-live="polite">{radioStreamStatus}</small>
                     <em>Ссылка на обычную веб-страницу станции не подойдёт: нужен адрес самого аудиопотока, обычно содержащий /stream или заканчивающийся на .mp3, .aac либо .ogg.</em>
                   </section>
                   <button className="radio-toggle" onClick={() => { ensureAudio(); setRadioPlaying((value) => !value); }}>{radioPlaying ? "Поставить на паузу" : "Продолжить воспроизведение"}</button>

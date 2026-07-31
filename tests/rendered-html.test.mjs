@@ -9,7 +9,7 @@ const pagesConfigUrl = new URL("../vite.pages.config.ts", import.meta.url);
 test("contains the expanded playable world and movement systems", async () => {
   const source = await readFile(sourceUrl, "utf8");
 
-  assert.match(source, /addNeighbourhood\(0,\s*15,\s*10\)/);
+  assert.match(source, /addNeighbourhood\(0,\s*28,\s*10\)/);
   assert.match(source, /addNeighbourhood\(1350,\s*25,\s*25\)/);
   assert.match(source, /addNeighbourhood\(2700,\s*25,\s*50\)/);
   assert.match(source, /addNeighbourhood\(4000,\s*25,\s*75\)/);
@@ -331,11 +331,16 @@ test("supports licensed custom radio streams with resilient offline fallback and
   assert.match(source, /customRadioUrl\?: string/);
   assert.match(source, /function startRadioStream/);
   assert.match(source, /new Audio\(\)/);
-  assert.match(source, /Нужна прямая HTTPS-ссылка/);
+  assert.match(source, /rawUrl\.replace\(\/\^http:/);
+  assert.match(source, /HTTP автоматически заменён на защищённый HTTPS/);
+  assert.match(source, /stream\.crossOrigin = "anonymous"/);
+  assert.match(source, /stream\.load\(\)/);
   assert.match(source, /attempt < 2/);
   assert.match(source, /Поток недоступен · включено офлайн-радио/);
   assert.match(source, /ссылка вида \/stream, \.mp3, \.aac или \.ogg/);
   assert.match(source, /Ссылка на обычную веб-страницу станции не подойдёт/);
+  assert.match(source, /className="stream-radio-status" role="status" aria-live="polite"/);
+  assert.match(styles, /\.stream-radio \.stream-radio-status/);
   assert.match(source, /vehicleEngine: OscillatorNode/);
   assert.match(source, /activeAudio\.vehicleEngine\.frequency\.setTargetAtTime/);
   assert.match(source, /playVehicleHorn/);
@@ -407,4 +412,21 @@ test("uses flat water and non-circular flocking wildlife with village fauna", as
   assert.match(source, /animal\.frightenedUntil = now \+ 4200/);
   assert.doesNotMatch(source, /animal\.mesh\.position\.x = animal\.homeX \+ Math\.cos/);
   assert.doesNotMatch(source, /animal\.mesh\.position\.z = animal\.homeZ \+ Math\.sin/);
+});
+
+test("adds denser housing, two active construction sites, and faster bird flights", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /addNeighbourhood\(0, 28, 10\)/);
+  assert.match(source, /const constructionAreas = \[/);
+  assert.match(source, /const addConstructionSite = \(/);
+  assert.match(source, /РАСШИРЕНИЕ СЕЛЬСКОЙ ШКОЛЫ/);
+  assert.match(source, /НОВЫЙ ЖИЛОЙ КОМПЛЕКС/);
+  assert.match(source, /constructionCranes\.forEach/);
+  assert.match(source, /constructionMixers\.forEach/);
+  assert.match(source, /workSchedule: spec\.night \? "night" : "day"/);
+  assert.match(source, /isFlockingBird \? 2\.9 \+ \(index % 4\) \* 0\.32/);
+  assert.match(source, /id: "quest_construction_century"/);
+  assert.match(source, /id: "quest_night_construction"/);
+  assert.match(source, /id: "urgent-generator"/);
 });
