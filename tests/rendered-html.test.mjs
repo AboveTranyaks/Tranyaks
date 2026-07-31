@@ -101,7 +101,7 @@ test("contains complete reset, safe NPC respawn, map routing, and corrected walk
   assert.match(source, /networkChannelRef\.current\?\.close\(\)/);
   assert.match(source, /residentsFromSave\(save: SaveData\)/);
   assert.match(source, /DEFAULT_CAR_POSITION/);
-  assert.match(source, /const baseSpeed = jogging \? 3\.5 : fastWalking \? 2\.5 : 1\.35/);
+  assert.match(source, /const baseSpeed = jogging \? 3\.5 : fastWalking \? 2\.5 : 1\.95/);
   assert.match(source, /mapRouteStyle/);
   assert.match(source, /minimap-distance/);
   assert.match(styles, /\.world-route\.active[\s\S]*transform-origin:\s*0 50%/);
@@ -168,7 +168,7 @@ test("starts without a personal car and animates stop passengers", async () => {
   assert.match(source, /state: "waiting"/);
   assert.match(source, /passenger\.state = "boarding"/);
   assert.match(source, /passenger\.state = "exiting"/);
-  assert.match(source, /new THREE\.MeshBasicMaterial\(\{ map: makeTextBoard\(`АВТОБУС/);
+  assert.match(source, /makeReadableTextSign\(makeTextBoard\(`/);
   assert.match(source, /side: THREE\.FrontSide/);
   assert.match(styles, /\.empty-garage-panel/);
 });
@@ -372,11 +372,37 @@ test("adds the carrier career, industrial logistics, inventory, and wildlife", a
   assert.match(source, /processFreightJob/);
   assert.match(source, /ПРОДУКТОВАЯ БАЗА/);
   assert.match(source, /СКЛАД СПЕКТР/);
-  assert.match(source, /const board = new THREE\.Mesh\([\s\S]*map: makeTextBoard\(building\.label/);
+  assert.match(source, /const board = makeReadableTextSign\([\s\S]*makeTextBoard\(building\.label/);
   assert.match(source, /function makeWildlife/);
   assert.match(source, /\[WildlifeManager\]/);
   assert.match(source, /setReputation\(\(value\) => Math\.max\(0, value - 15\)\)/);
   assert.match(styles, /\.carrier-career/);
   assert.match(styles, /\.freight-app/);
   assert.match(styles, /\.inventory-overlay/);
+});
+
+test("keeps residents facing the street and connects every house to a footpath", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /const addHousePath = \(x: number, z: number\)/);
+  assert.match(source, /addHousePath\(x, z\)/);
+  assert.match(source, /const doorZ = z - side \* 4\.7/);
+  assert.match(source, /npc\.rotation\.y = resident\.z > 0 \? Math\.PI : 0/);
+  assert.match(source, /resident\.mesh\.rotation\.y = resident\.z > 0 \? Math\.PI : 0/);
+  assert.doesNotMatch(source, /resident\.mesh\.rotation\.y = Math\.sin/);
+});
+
+test("uses flat water and non-circular flocking wildlife with village fauna", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /function makeFlatRiverGeometry/);
+  assert.match(source, /new THREE\.Mesh\(makeFlatRiverGeometry\(curve\), riverMat\)/);
+  assert.doesNotMatch(source, /new THREE\.TubeGeometry\(curve/);
+  assert.match(source, /type BirdFlockState/);
+  assert.match(source, /Array\.from\(\{ length: 24 \}/);
+  assert.match(source, /state: "ground" \| "flying" \| "landing"/);
+  assert.match(source, /\{ kind: "bird", x: 0, z: 42, count: 12/);
+  assert.match(source, /animal\.frightenedUntil = now \+ 4200/);
+  assert.doesNotMatch(source, /animal\.mesh\.position\.x = animal\.homeX \+ Math\.cos/);
+  assert.doesNotMatch(source, /animal\.mesh\.position\.z = animal\.homeZ \+ Math\.sin/);
 });

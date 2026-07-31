@@ -49,6 +49,20 @@ type WildlifeAgent = {
   phase: number;
   flying: boolean;
   frightenedUntil: number;
+  flightTarget: THREE.Vector3;
+  flightPauseUntil: number;
+  airborne: boolean;
+  flockId: number | null;
+  flockOffset: THREE.Vector3;
+};
+
+type BirdFlockState = {
+  id: number;
+  members: WildlifeAgent[];
+  landingPoints: THREE.Vector3[];
+  targetIndex: number;
+  state: "ground" | "flying" | "landing";
+  nextStateAt: number;
 };
 
 type AudioMix = {
@@ -269,6 +283,7 @@ type Walker = {
   direction: 1 | -1;
   speed: number;
   personalReputation: number;
+  stationary?: boolean;
 };
 
 type TrafficVehicle = {
@@ -1587,6 +1602,49 @@ function makeTextBoard(text: string, width = 512, height = 128, background = "#f
   return texture;
 }
 
+function makeReadableTextSign(texture: THREE.Texture, width: number, height: number) {
+  const group = new THREE.Group();
+  const geometry = new THREE.PlaneGeometry(width, height);
+  const front = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({ map: texture, side: THREE.FrontSide }),
+  );
+  const back = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({ map: texture, side: THREE.FrontSide }),
+  );
+  back.rotation.y = Math.PI;
+  back.position.z = -0.018;
+  group.add(front, back);
+  return group;
+}
+
+function makeFlatRiverGeometry(curve: THREE.CatmullRomCurve3, segments = 80, halfWidth = 6.5) {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+  for (let index = 0; index <= segments; index++) {
+    const t = index / segments;
+    const point = curve.getPoint(t);
+    const tangent = curve.getTangent(t).normalize();
+    const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    const left = point.clone().addScaledVector(side, halfWidth);
+    const right = point.clone().addScaledVector(side, -halfWidth);
+    positions.push(left.x, 0.025, left.z, right.x, 0.025, right.z);
+    uvs.push(t, 0, t, 1);
+    if (index < segments) {
+      const vertex = index * 2;
+      indices.push(vertex, vertex + 2, vertex + 1, vertex + 1, vertex + 2, vertex + 3);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function makeBusStop(stop: BusStopSpec) {
   const group = new THREE.Group();
   group.name = `busStop-${stop.id}`;
@@ -1601,7 +1659,7 @@ function makeBusStop(stop: BusStopSpec) {
   bench.position.set(0, 0.9, -0.7);
   const benchBack = new THREE.Mesh(new THREE.BoxGeometry(4.8, 1.0, 0.2), mat(0x7d5a3c));
   benchBack.position.set(0, 1.35, -1.14);
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 1.25), new THREE.MeshBasicMaterial({ map: makeTextBoard(`АВТОБУС · ${stop.name}`), side: THREE.FrontSide }));
+  const sign = makeReadableTextSign(makeTextBoard(`АВТОБУС · ${stop.name}`), 5.6, 1.25);
   sign.position.set(0, 2.65, -1.37);
   const routePlate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.14), mat(0xf0b44e));
   routePlate.position.set(2.85, 2.0, -1.55);
@@ -1636,7 +1694,7 @@ function makeBus() {
       group.add(window);
     }
   }
-  const route = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.72), new THREE.MeshBasicMaterial({ map: makeTextBoard("ДИНСКАЯ — ПЕРВОРЕЧЕНСКОЕ"), side: THREE.DoubleSide }));
+  const route = makeReadableTextSign(makeTextBoard("ДИНСКАЯ — ПЕРВОРЕЧЕНСКОЕ"), 2.8, 0.72);
   route.position.set(0, 2.62, 4.62);
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.25, 2.15, 0.12), mat(0x426b68));
   // The curb-side door is on local -X when the bus travels forward (+Z).
@@ -1678,7 +1736,7 @@ function makeGasStation(name: string, x: number, z: number) {
   shopWindow.name = "stationWindow";
   const canopy = new THREE.Mesh(new THREE.BoxGeometry(17, 0.7, 9), mat(0x4d8069));
   canopy.position.set(-6, 5.2, -3);
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(9.5, 1.4), new THREE.MeshBasicMaterial({ map: makeTextBoard(name, 640, 120, "#315c45", "#d8f46d"), side: THREE.DoubleSide }));
+  const sign = makeReadableTextSign(makeTextBoard(name, 640, 120, "#315c45", "#d8f46d"), 9.5, 1.4);
   sign.position.set(8, 5.0, 1.85);
   for (const columnX of [-12, 0]) {
     const support = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 5, 7), mat(0xe7e3d8));
@@ -2893,14 +2951,15 @@ export default function SecurityConsoleGame() {
       opacity: 0.92,
     });
     const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-175, 0.18, 184),
-      new THREE.Vector3(-105, 0.18, 172),
-      new THREE.Vector3(-35, 0.18, 188),
-      new THREE.Vector3(38, 0.18, 176),
-      new THREE.Vector3(108, 0.18, 190),
-      new THREE.Vector3(175, 0.18, 181),
+      new THREE.Vector3(-175, 0, 184),
+      new THREE.Vector3(-105, 0, 172),
+      new THREE.Vector3(-35, 0, 188),
+      new THREE.Vector3(38, 0, 176),
+      new THREE.Vector3(108, 0, 190),
+      new THREE.Vector3(175, 0, 181),
     ]);
-    const river = new THREE.Mesh(new THREE.TubeGeometry(curve, 80, 6.5, 8, false), riverMat);
+    const river = new THREE.Mesh(makeFlatRiverGeometry(curve), riverMat);
+    river.receiveShadow = true;
     scene.add(river);
 
     // Trees stay on dry land; none are generated inside the river corridor.
@@ -2915,6 +2974,19 @@ export default function SecurityConsoleGame() {
       makeTree(scene, x + 48, 29, 0.8);
     }
 
+    const addHousePath = (x: number, z: number) => {
+      const district = nearestDistrict(x);
+      const profile = SIDEWALK_PROFILES[district.id];
+      const side = z >= 0 ? 1 : -1;
+      const doorZ = z - side * 4.7;
+      const sidewalkZ = Math.abs(z) <= 55
+        ? side * sidewalkCenterZ(profile)
+        : side * (72 + 5.15 + profile.width / 2);
+      const pathLength = Math.max(0.8, Math.abs(doorZ - sidewalkZ));
+      const pathZ = (doorZ + sidewalkZ) / 2;
+      box(scene, [2.1, 0.12, pathLength], [x, 0.26, pathZ], 0xc9b991);
+    };
+
     const houses: [number, number][] = residentsRef.current.map((r) => [r.x, r.z]);
     houses.forEach(([x, z], i) => {
       const colors = [0xe1b47d, 0xd89073, 0xd6c98a, 0x8eaf9a, 0xc7a3a3];
@@ -2925,7 +2997,10 @@ export default function SecurityConsoleGame() {
         }
       });
       engine.colliders.push({ x, z, halfX: 5.4, halfZ: 4.9, kind: "house" });
-      box(scene, [13, 0.42, 0.28], [x, 0.5, z + (z > 0 ? -6.4 : 6.4)], 0x806f55);
+      const fenceZ = z + (z > 0 ? -6.4 : 6.4);
+      box(scene, [5.1, 0.42, 0.28], [x - 3.95, 0.5, fenceZ], 0x806f55);
+      box(scene, [5.1, 0.42, 0.28], [x + 3.95, 0.5, fenceZ], 0x806f55);
+      addHousePath(x, z);
     });
 
     const houseColors = [0xe1b47d, 0xd89073, 0xd6c98a, 0x8eaf9a, 0xc7a3a3, 0x9bb8c2];
@@ -2948,6 +3023,7 @@ export default function SecurityConsoleGame() {
           }
         });
         engine.colliders.push({ x, z, halfX: 5.4, halfZ: 4.9, kind: "house" });
+        addHousePath(x, z);
         added += 1;
       }
     };
@@ -3054,6 +3130,19 @@ export default function SecurityConsoleGame() {
       cashier.position.set(station.x + (station.z > 0 ? -2 : 2), 0, station.z + (station.z > 0 ? -11 : 11));
       cashier.rotation.y = station.z > 0 ? Math.PI : 0;
       scene.add(cashier);
+      const cashierId = 400 + stationIndex;
+      engine.walkers.push({
+        id: cashierId,
+        name: stationIndex === 0 ? "Кассир Марина" : "Кассир Алексей",
+        mesh: cashier,
+        minX: cashier.position.x,
+        maxX: cashier.position.x,
+        laneZ: cashier.position.z,
+        direction: 1,
+        speed: 0,
+        personalReputation: initialSave.streetReputation?.[cashierId] ?? 0,
+        stationary: true,
+      });
     });
 
     box(scene, [18, 7, 13], [92, 3.5, -18], 0x446f59);
@@ -3148,12 +3237,10 @@ export default function SecurityConsoleGame() {
       box(scene, [building.w, 8 + (index % 2), building.d], [building.x, 4 + (index % 2) * 0.5, building.z], building.wall);
       box(scene, [building.w + 1.4, 0.85, building.d + 1.4], [building.x, 8.45 + (index % 2), building.z], building.roof);
       box(scene, [7, 4.8, 0.3], [building.x, 2.45, building.z - building.d / 2 - 0.05], 0x4d5657);
-      const board = new THREE.Mesh(
-        new THREE.PlaneGeometry(9.2, 1.7),
-        new THREE.MeshBasicMaterial({
-          map: makeTextBoard(building.label, 512, 96, "#eef0e8", "#273d36"),
-          side: THREE.DoubleSide,
-        }),
+      const board = makeReadableTextSign(
+        makeTextBoard(building.label, 512, 96, "#eef0e8", "#273d36"),
+        9.2,
+        1.7,
       );
       board.position.set(building.x, 7.1 + (index % 2), building.z - building.d / 2 - 0.22);
       scene.add(board);
@@ -3165,6 +3252,7 @@ export default function SecurityConsoleGame() {
       container.castShadow = true;
       scene.add(container);
     }
+    const industrialNpcNames = ["Кладовщик Борис", "Диспетчер Ольга", "Механик Артём", "Охранник Сергей"];
     for (let index = 0; index < 4; index++) {
       const industrialNpc = makePerson([0x6d7e74, 0x9a765c, 0x527491, 0x806a55][index]);
       industrialNpc.position.set(3638 + index * 27, 0, 84);
@@ -3174,6 +3262,19 @@ export default function SecurityConsoleGame() {
       questMarker.name = "freightQuestMarker";
       industrialNpc.add(questMarker);
       scene.add(industrialNpc);
+      const industrialNpcId = 300 + index;
+      engine.walkers.push({
+        id: industrialNpcId,
+        name: industrialNpcNames[index],
+        mesh: industrialNpc,
+        minX: industrialNpc.position.x,
+        maxX: industrialNpc.position.x,
+        laneZ: industrialNpc.position.z,
+        direction: 1,
+        speed: 0,
+        personalReputation: initialSave.streetReputation?.[industrialNpcId] ?? 0,
+        stationary: true,
+      });
     }
 
     // Distinct service centres make the two unlockable districts readable from the road.
@@ -3209,10 +3310,7 @@ export default function SecurityConsoleGame() {
         signCtx.fillText(text, canvas.width / 2, 82);
       }
       const texture = new THREE.CanvasTexture(canvas);
-      const board = new THREE.Mesh(
-        new THREE.PlaneGeometry(text.length > 18 ? 13 : 10, 2),
-        new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }),
-      );
+      const board = makeReadableTextSign(texture, text.length > 18 ? 13 : 10, 2);
       board.position.set(x, 4.2, z);
       board.rotation.y = faceWest ? -Math.PI / 2 : Math.PI / 2;
       scene.add(board);
@@ -3245,6 +3343,7 @@ export default function SecurityConsoleGame() {
     residentsRef.current.forEach((resident) => {
       const npc = makePerson(resident.color);
       npc.position.set(resident.x + 5, 0, resident.z + (resident.z > 0 ? -5 : 5));
+      npc.rotation.y = resident.z > 0 ? Math.PI : 0;
       const marker = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.55, 0),
         mat(resident.signed ? 0xcce86b : 0xf28c55),
@@ -3301,6 +3400,13 @@ export default function SecurityConsoleGame() {
     console.info("[NPCSpawner] Станица Динская: создано 30 уличных NPC");
 
     const wildlifeSeeds: { kind: WildlifeKind; x: number; z: number; count: number; radius: number; color: number; flying?: boolean }[] = [
+      { kind: "cat", x: -55, z: 58, count: 4, radius: 42, color: 0xb57b4f },
+      { kind: "dog", x: 65, z: -55, count: 3, radius: 42, color: 0x7d5b42 },
+      { kind: "cow", x: 145, z: 138, count: 2, radius: 20, color: 0xe8dfc9 },
+      { kind: "goat", x: -120, z: 125, count: 3, radius: 25, color: 0xc9b894 },
+      { kind: "chicken", x: 105, z: 120, count: 8, radius: 24, color: 0xc78652 },
+      { kind: "bird", x: 0, z: 42, count: 12, radius: 125, color: 0x71818c, flying: true },
+      { kind: "stork", x: 120, z: 132, count: 3, radius: 70, color: 0xf1eee1, flying: true },
       { kind: "cat", x: 4010, z: 42, count: 6, radius: 80, color: 0xb57b4f },
       { kind: "dog", x: 3940, z: -108, count: 4, radius: 65, color: 0x7d5b42 },
       { kind: "cow", x: 4125, z: 142, count: 5, radius: 38, color: 0xe8dfc9 },
@@ -3315,31 +3421,76 @@ export default function SecurityConsoleGame() {
       { kind: "butterfly", x: 40, z: 125, count: 12, radius: 80, color: 0xe9b84c, flying: true },
     ];
     let wildlifeId = 0;
+    let nextBirdFlockId = 0;
+    const birdFlocks = new Map<number, BirdFlockState>();
     wildlifeSeeds.forEach((seed) => {
+      const isFlockingBird = seed.kind === "bird" || seed.kind === "stork";
+      const flockBaseId = nextBirdFlockId;
+      if (isFlockingBird) nextBirdFlockId += Math.ceil(seed.count / 5);
       for (let index = 0; index < seed.count; index++) {
         const angle = (index / seed.count) * Math.PI * 2;
-        const distance = seed.radius * (0.35 + ((index * 37) % 60) / 100);
+        const distance = seed.radius * (0.18 + ((index * 37) % 52) / 100);
         const animal = makeWildlife(seed.kind, seed.color + (index % 3) * 0x080402);
+        const flockId = isFlockingBird ? flockBaseId + Math.floor(index / 5) : null;
+        const flockOffset = new THREE.Vector3(
+          ((index % 5) - 2) * 1.15,
+          0,
+          ((index * 3) % 5 - 2) * 0.85,
+        );
         animal.position.set(
           seed.x + Math.cos(angle) * distance,
-          seed.flying ? (seed.kind === "stork" ? 18 + (index % 3) * 4 : 2.5 + (index % 4)) : 0,
+          seed.kind === "butterfly" ? 1.8 + (index % 4) * 0.35 : 0,
           seed.z + Math.sin(angle) * distance,
         );
         const scale = seed.kind === "cow" || seed.kind === "horse" ? 1.15 : seed.kind === "chicken" ? 0.72 : 1;
         animal.scale.setScalar(scale);
         scene.add(animal);
-        engine.wildlife.push({
+        const agent: WildlifeAgent = {
           id: wildlifeId++,
           kind: seed.kind,
           mesh: animal,
           homeX: seed.x,
           homeZ: seed.z,
           radius: seed.radius,
-          speed: seed.flying ? 1.4 + (index % 4) * 0.35 : 0.28 + (index % 5) * 0.14,
+          speed: seed.kind === "butterfly" ? 0.65 + (index % 3) * 0.12 : isFlockingBird ? 1.45 + (index % 4) * 0.16 : 0.28 + (index % 5) * 0.14,
           phase: angle,
           flying: Boolean(seed.flying),
           frightenedUntil: 0,
-        });
+          flightTarget: animal.position.clone(),
+          flightPauseUntil: performance.now() + 1200 + index * 180,
+          airborne: seed.kind === "butterfly",
+          flockId,
+          flockOffset,
+        };
+        engine.wildlife.push(agent);
+        if (flockId !== null) {
+          let flock = birdFlocks.get(flockId);
+          if (!flock) {
+            const landingPoints = Array.from({ length: 24 }, (_, pointIndex) => {
+              const pointAngle = pointIndex * 2.399963 + flockId * 0.63;
+              const pointRadius = seed.radius * (0.16 + ((pointIndex * 37 + flockId * 19) % 78) / 100);
+              return new THREE.Vector3(
+                clamp(seed.x + Math.cos(pointAngle) * pointRadius, -165, 4165),
+                0,
+                clamp(seed.z + Math.sin(pointAngle) * pointRadius, -158, 158),
+              );
+            });
+            flock = {
+              id: flockId,
+              members: [],
+              landingPoints,
+              targetIndex: (flockId * 7) % landingPoints.length,
+              state: "ground",
+              nextStateAt: performance.now() + 7000 + (flockId % 5) * 1700,
+            };
+            birdFlocks.set(flockId, flock);
+          }
+          flock.members.push(agent);
+          const landing = flock.landingPoints[flock.targetIndex];
+          animal.position.copy(landing).add(flockOffset);
+          animal.position.y = 0;
+          agent.flightTarget.copy(animal.position).add(new THREE.Vector3(Math.sin(index) * 2.2, 0, Math.cos(index) * 2.2));
+        }
       }
     });
     console.info(`[WildlifeManager] Создано животных и птиц: ${engine.wildlife.length}`);
@@ -3879,7 +4030,7 @@ export default function SecurityConsoleGame() {
         const fatigueSpeed = energyRef.current < 20 ? 0.7 : 1;
         const carriedWeight = inventoryRef.current.reduce((sum, stack) => sum + INVENTORY_ITEMS[stack.id].weight * stack.amount, 0);
         const overweightSpeed = clamp(1 - Math.max(0, carriedWeight - 10) * 0.05, 0.7, 1);
-        const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.35;
+        const baseSpeed = jogging ? 3.5 : fastWalking ? 2.5 : 1.95;
         const speed = baseSpeed * outfit.speed * surfaceSpeed * fatigueSpeed * overweightSpeed * (usingPhone ? 0.38 : 1);
         currentWalkSpeedKmh = moving ? speed * 3.6 : 0;
         if (moving) {
@@ -3993,7 +4144,7 @@ export default function SecurityConsoleGame() {
 
       engine.residents.forEach((resident, i) => {
         if (!resident.mesh) return;
-        resident.mesh.rotation.y = Math.sin(now * 0.0004 + i) * 0.35;
+        resident.mesh.rotation.y = resident.z > 0 ? Math.PI : 0;
         personWalkCycle(resident.mesh, false, now, i);
         const marker = resident.mesh.getObjectByName("marker");
         if (marker) marker.position.y = 5.7 + Math.sin(now * 0.003 + i) * 0.18;
@@ -4005,6 +4156,8 @@ export default function SecurityConsoleGame() {
             player.position.x - walker.mesh.position.x,
             player.position.z - walker.mesh.position.z,
           );
+        }
+        if (talking || walker.stationary) {
           personWalkCycle(walker.mesh, false, now, i * 0.7);
           return;
         }
@@ -4018,38 +4171,158 @@ export default function SecurityConsoleGame() {
         walker.mesh.rotation.y = walker.direction > 0 ? Math.PI / 2 : -Math.PI / 2;
         personWalkCycle(walker.mesh, true, now, i * 0.7);
       });
+      birdFlocks.forEach((flock) => {
+        const landingPoint = flock.landingPoints[flock.targetIndex];
+        const playerIsNear = flock.members.some((member) =>
+          Math.hypot(member.mesh.position.x - player.position.x, member.mesh.position.z - player.position.z) < 7,
+        );
+        if (flock.state === "ground" && (playerIsNear || now >= flock.nextStateAt)) {
+          const pointOffset = 1 + Math.floor(Math.random() * (flock.landingPoints.length - 1));
+          flock.targetIndex = (flock.targetIndex + pointOffset) % flock.landingPoints.length;
+          flock.state = "flying";
+          flock.members.forEach((member) => {
+            member.airborne = true;
+            member.flightPauseUntil = 0;
+          });
+        } else if (
+          flock.state === "flying" &&
+          flock.members.every((member) => {
+            const target = flock.landingPoints[flock.targetIndex].clone().add(member.flockOffset);
+            return Math.hypot(member.mesh.position.x - target.x, member.mesh.position.z - target.z) < 2.4;
+          })
+        ) {
+          flock.state = "landing";
+        } else if (flock.state === "landing" && flock.members.every((member) => member.mesh.position.y < 0.16)) {
+          flock.state = "ground";
+          flock.nextStateAt = now + 6500 + Math.random() * 8500;
+          flock.members.forEach((member, memberIndex) => {
+            member.airborne = false;
+            member.mesh.position.y = 0;
+            member.flightTarget.copy(landingPoint).add(member.flockOffset);
+            member.flightTarget.x += Math.sin(memberIndex * 2.1) * 2.2;
+            member.flightTarget.z += Math.cos(memberIndex * 1.7) * 2.2;
+            member.flightPauseUntil = now + 800 + Math.random() * 1800;
+          });
+        }
+      });
+
       engine.wildlife.forEach((animal) => {
-        animal.phase += dt * animal.speed * (animal.frightenedUntil > now ? 3.2 : 1);
+        animal.phase += dt * (animal.airborne ? 2.2 : animal.speed * 4);
         const playerDistance = Math.hypot(
           animal.mesh.position.x - player.position.x,
           animal.mesh.position.z - player.position.z,
         );
-        if (!animal.flying && playerDistance < 5 && !["cat", "dog", "cow", "goat", "horse", "chicken"].includes(animal.kind)) {
-          animal.frightenedUntil = now + 4200;
-        }
-        if (animal.flying) {
-          animal.mesh.position.x = animal.homeX + Math.cos(animal.phase * 0.48 + animal.id) * animal.radius * 0.72;
-          animal.mesh.position.z = animal.homeZ + Math.sin(animal.phase * 0.48 + animal.id) * animal.radius * 0.52;
-          animal.mesh.position.y = animal.kind === "stork"
-            ? 19 + Math.sin(animal.phase * 0.7) * 4
-            : 2.5 + (animal.id % 4) + Math.sin(animal.phase * 1.6) * 0.8;
-          animal.mesh.rotation.y = -animal.phase * 0.48;
+        const flock = animal.flockId === null ? null : birdFlocks.get(animal.flockId) ?? null;
+
+        if (animal.kind === "butterfly") {
+          const distanceToTarget = animal.mesh.position.distanceTo(animal.flightTarget);
+          if (distanceToTarget < 0.65 || now >= animal.flightPauseUntil) {
+            const targetAngle = Math.random() * Math.PI * 2;
+            const targetRadius = Math.sqrt(Math.random()) * animal.radius * 0.72;
+            animal.flightTarget.set(
+              animal.homeX + Math.cos(targetAngle) * targetRadius,
+              1.5 + Math.random() * 2.8,
+              animal.homeZ + Math.sin(targetAngle) * targetRadius,
+            );
+            animal.flightPauseUntil = now + 3000 + Math.random() * 4500;
+          }
+          const direction = animal.flightTarget.clone().sub(animal.mesh.position);
+          const distance = direction.length();
+          if (distance > 0.01) {
+            direction.normalize();
+            animal.mesh.position.addScaledVector(direction, Math.min(distance, animal.speed * dt));
+            animal.mesh.rotation.y = Math.atan2(direction.x, direction.z);
+          }
+        } else if (flock) {
+          const landing = flock.landingPoints[flock.targetIndex];
+          if (flock.state === "ground") {
+            const targetDistance = Math.hypot(
+              animal.mesh.position.x - animal.flightTarget.x,
+              animal.mesh.position.z - animal.flightTarget.z,
+            );
+            if (targetDistance < 0.35 && now >= animal.flightPauseUntil) {
+              const walkAngle = Math.random() * Math.PI * 2;
+              const walkRadius = 0.8 + Math.random() * 2.6;
+              animal.flightTarget.set(
+                landing.x + animal.flockOffset.x + Math.cos(walkAngle) * walkRadius,
+                0,
+                landing.z + animal.flockOffset.z + Math.sin(walkAngle) * walkRadius,
+              );
+              animal.flightPauseUntil = now + 900 + Math.random() * 2200;
+            }
+            const direction = animal.flightTarget.clone().sub(animal.mesh.position);
+            direction.y = 0;
+            const distance = direction.length();
+            if (distance > 0.08) {
+              direction.normalize();
+              animal.mesh.position.addScaledVector(direction, Math.min(distance, dt * (0.24 + (animal.id % 3) * 0.06)));
+              animal.mesh.rotation.y = Math.atan2(direction.x, direction.z);
+            }
+            animal.mesh.position.y = 0;
+          } else {
+            const target = landing.clone().add(animal.flockOffset);
+            target.y = flock.state === "flying"
+              ? (animal.kind === "stork" ? 11 + (animal.id % 3) * 1.7 : 6 + (animal.id % 4) * 0.65)
+              : 0;
+            const direction = target.sub(animal.mesh.position);
+            const distance = direction.length();
+            if (distance > 0.02) {
+              direction.normalize();
+              const airSpeed = flock.state === "landing" ? animal.speed * 0.72 : animal.speed;
+              animal.mesh.position.addScaledVector(direction, Math.min(distance, airSpeed * dt));
+              animal.mesh.rotation.y = Math.atan2(direction.x, direction.z);
+            }
+          }
         } else {
-          const roamRadius = animal.radius * (animal.frightenedUntil > now ? 0.72 : 0.42);
-          animal.mesh.position.x = animal.homeX + Math.cos(animal.phase + animal.id * 0.7) * roamRadius;
-          animal.mesh.position.z = animal.homeZ + Math.sin(animal.phase * 0.83 + animal.id) * roamRadius;
-          animal.mesh.rotation.y = Math.atan2(
-            -Math.sin(animal.phase + animal.id * 0.7),
-            Math.cos(animal.phase * 0.83 + animal.id),
+          if (playerDistance < 6) {
+            animal.frightenedUntil = now + 4200;
+            const away = animal.mesh.position.clone().sub(player.position);
+            away.y = 0;
+            if (away.lengthSq() < 0.01) away.set(1, 0, 0);
+            away.normalize();
+            const runDistance = 10 + Math.random() * 7;
+            const target = animal.mesh.position.clone().addScaledVector(away, runDistance);
+            const fromHome = target.clone().sub(new THREE.Vector3(animal.homeX, 0, animal.homeZ));
+            if (fromHome.length() > animal.radius * 0.88) fromHome.setLength(animal.radius * 0.88);
+            animal.flightTarget.set(animal.homeX + fromHome.x, 0, animal.homeZ + fromHome.z);
+            animal.flightPauseUntil = now + 1200;
+          }
+          const targetDistance = Math.hypot(
+            animal.mesh.position.x - animal.flightTarget.x,
+            animal.mesh.position.z - animal.flightTarget.z,
           );
+          if (targetDistance < 0.4 && now >= animal.flightPauseUntil && animal.frightenedUntil <= now) {
+            for (let attempt = 0; attempt < 4; attempt++) {
+              const walkAngle = Math.random() * Math.PI * 2;
+              const walkRadius = Math.sqrt(Math.random()) * animal.radius * 0.78;
+              const targetX = animal.homeX + Math.cos(walkAngle) * walkRadius;
+              const targetZ = animal.homeZ + Math.sin(walkAngle) * walkRadius;
+              if (!isBlocked(targetX, targetZ, 0.45, false)) {
+                animal.flightTarget.set(targetX, 0, targetZ);
+                break;
+              }
+            }
+            animal.flightPauseUntil = now + 1100 + Math.random() * 3100;
+          }
+          const direction = animal.flightTarget.clone().sub(animal.mesh.position);
+          direction.y = 0;
+          const distance = direction.length();
+          if (distance > 0.06) {
+            direction.normalize();
+            const fleeing = animal.frightenedUntil > now;
+            const groundSpeed = animal.speed * (fleeing ? 3.1 : 1);
+            animal.mesh.position.addScaledVector(direction, Math.min(distance, groundSpeed * dt));
+            animal.mesh.rotation.y = Math.atan2(direction.x, direction.z);
+          }
           animal.mesh.position.y = animal.kind === "hare" && animal.frightenedUntil > now
             ? Math.abs(Math.sin(animal.phase * 7)) * 0.42
             : 0;
         }
         const leftWing = animal.mesh.getObjectByName("leftWing");
         const rightWing = animal.mesh.getObjectByName("rightWing");
-        if (leftWing) leftWing.rotation.z = Math.sin(animal.phase * 7) * 0.85;
-        if (rightWing) rightWing.rotation.z = -Math.sin(animal.phase * 7) * 0.85;
+        const wingAngle = animal.airborne ? Math.sin(animal.phase * 7) * 0.72 : 0.08;
+        if (leftWing) leftWing.rotation.z = wingAngle;
+        if (rightWing) rightWing.rotation.z = -wingAngle;
         const tail = animal.mesh.getObjectByName("tail");
         if (tail) tail.rotation.z = Math.sin(animal.phase * 4) * 0.26;
         for (let legIndex = 0; legIndex < 4; legIndex++) {
@@ -4058,7 +4331,7 @@ export default function SecurityConsoleGame() {
         }
         if (
           engine.driving &&
-          !animal.flying &&
+          !animal.airborne &&
           Math.abs(engine.carSpeed) > 2 &&
           car.position.distanceTo(animal.mesh.position) < 2.1 &&
           now - lastWildlifeCollisionAtRef.current > 4500
