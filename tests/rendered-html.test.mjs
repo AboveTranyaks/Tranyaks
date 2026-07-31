@@ -9,10 +9,8 @@ const pagesConfigUrl = new URL("../vite.pages.config.ts", import.meta.url);
 test("contains the expanded playable world and movement systems", async () => {
   const source = await readFile(sourceUrl, "utf8");
 
-  assert.match(source, /addNeighbourhood\(0,\s*28,\s*10\)/);
-  assert.match(source, /addNeighbourhood\(1350,\s*25,\s*25\)/);
-  assert.match(source, /addNeighbourhood\(2700,\s*25,\s*50\)/);
-  assert.match(source, /addNeighbourhood\(4000,\s*25,\s*75\)/);
+  assert.match(source, /function createNeighbourhoodResidentSeeds/);
+  assert.match(source, /const ALL_RESIDENT_SEED = \[\.\.\.RESIDENT_SEED, \.\.\.createNeighbourhoodResidentSeeds\(\)\]/);
   assert.match(source, /function surfaceAt/);
   assert.match(source, /fastWalkUntil/);
   assert.match(source, /const energyCost = \(jogging \? 1\.5 : fastWalking \? 0\.5 : 0\.2\)/);
@@ -314,7 +312,8 @@ test("adds district sidewalks, crossings, rest benches, and procedural audio", a
   assert.match(source, /surface: "Проезжая часть", speed: 0\.8, energy: 1\.2/);
   assert.match(source, /const addStreetBench/);
   assert.match(source, /isPedestrianCrossing\(player\.position\.x, player\.position\.z\)/);
-  assert.match(source, /trafficVehicle\.speed \* \(yieldingAtCrossing \? 0\.12 : 1\)/);
+  assert.match(source, /const blockedByDynamicObject = playerBlocksLane \|\| ownCarBlocksLane \|\| busBlocksLane \|\| trafficBlocksLane \|\| staticBlocksLane/);
+  assert.match(source, /const trafficSpeed = now < trafficVehicle\.stoppedUntil \? 0 : trafficVehicle\.speed/);
   assert.match(source, /const playFootstep = useCallback/);
   assert.match(source, /new AudioContext\(\)/);
   assert.match(source, /Тревоги нельзя сделать тише 30%/);
@@ -445,7 +444,7 @@ test("uses flat water and non-circular flocking wildlife with village fauna", as
 test("adds denser housing, two active construction sites, and faster bird flights", async () => {
   const source = await readFile(sourceUrl, "utf8");
 
-  assert.match(source, /addNeighbourhood\(0, 28, 10\)/);
+  assert.match(source, /createNeighbourhoodResidentSeeds/);
   assert.match(source, /const constructionAreas = \[/);
   assert.match(source, /const addConstructionSite = \(/);
   assert.match(source, /РАСШИРЕНИЕ СЕЛЬСКОЙ ШКОЛЫ/);
@@ -457,4 +456,21 @@ test("adds denser housing, two active construction sites, and faster bird flight
   assert.match(source, /id: "quest_construction_century"/);
   assert.match(source, /id: "quest_night_construction"/);
   assert.match(source, /id: "urgent-generator"/);
+});
+
+test("adds traffic yielding, bus stop requests, zero-start economy, and residents for every house", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /stoppedUntil: number/);
+  assert.match(source, /const isObstacleAhead =/);
+  assert.match(source, /busStopRequestedRef\.current = true/);
+  assert.match(source, /e\.code === "KeyR" && modeRef\.current === "busRide"/);
+  assert.match(source, /className="bus-exit-button"/);
+  assert.match(source, /ridingBus \? clamp\(engine\.zoom \* 0\.42, 1\.5, 6\)/);
+  assert.match(source, /money: 0/);
+  assert.match(source, /inventory: \[\]/);
+  assert.match(source, /function createNeighbourhoodResidentSeeds/);
+  assert.match(source, /return ALL_RESIDENT_SEED\.map/);
+  assert.match(source, /function makeBush/);
+  assert.match(source, /makeBush\(scene, x - 4\.6/);
 });
