@@ -3148,9 +3148,14 @@ export default function SecurityConsoleGame() {
       box(scene, [building.w, 8 + (index % 2), building.d], [building.x, 4 + (index % 2) * 0.5, building.z], building.wall);
       box(scene, [building.w + 1.4, 0.85, building.d + 1.4], [building.x, 8.45 + (index % 2), building.z], building.roof);
       box(scene, [7, 4.8, 0.3], [building.x, 2.45, building.z - building.d / 2 - 0.05], 0x4d5657);
-      const board = makeTextBoard(building.label, 512, 96, "#eef0e8", "#273d36");
+      const board = new THREE.Mesh(
+        new THREE.PlaneGeometry(9.2, 1.7),
+        new THREE.MeshBasicMaterial({
+          map: makeTextBoard(building.label, 512, 96, "#eef0e8", "#273d36"),
+          side: THREE.DoubleSide,
+        }),
+      );
       board.position.set(building.x, 7.1 + (index % 2), building.z - building.d / 2 - 0.22);
-      board.scale.set(9.2, 1.7, 1);
       scene.add(board);
       engine.colliders.push({ x: building.x, z: building.z, halfX: building.w / 2 + 0.5, halfZ: building.d / 2 + 0.5, kind: "landmark" });
     });
