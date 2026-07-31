@@ -3107,6 +3107,45 @@ kbd {
   background: rgba(10, 22, 18, 0.68);
 }
 
+.record-radio {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid rgba(238, 83, 73, 0.46);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(86, 24, 25, 0.78), rgba(20, 24, 22, 0.82));
+}
+
+.record-radio > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.record-radio > div span,
+.record-radio small {
+  color: #e6c7c3;
+  font-size: 10px;
+}
+
+.record-radio select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 10px;
+  color: #f8f3e8;
+  background: #26332e;
+}
+
+.record-radio button {
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  background: #df4d48;
+  font-weight: 900;
+}
+
 .stream-radio > div {
   display: grid;
   gap: 3px;
@@ -3939,6 +3978,34 @@ kbd {
 .freight-hud span { font-size: 13px; }
 .freight-hud small { color: #bdcec5; }
 
+.freight-context-hint {
+  position: fixed;
+  z-index: 35;
+  left: 50%;
+  bottom: 92px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transform: translateX(-50%);
+  padding: 10px 14px;
+  border: 1px solid rgba(242, 198, 111, 0.48);
+  border-radius: 13px;
+  color: #f8f5e9;
+  background: rgba(29, 49, 42, 0.94);
+  box-shadow: 0 12px 30px rgba(12, 27, 22, 0.28);
+}
+
+.freight-context-hint kbd {
+  display: grid;
+  min-width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+  color: #263c33;
+  background: #cbee58;
+  font-weight: 900;
+}
+
 .freight-app {
   display: grid;
   gap: 10px;
@@ -3984,6 +4051,34 @@ kbd {
 .freight-card.active { border-color: #e4a643; }
 .freight-card.completed { opacity: 0.62; }
 .freight-card em { grid-column: 1 / -1; color: #aee589; font-style: normal; font-weight: 800; }
+.freight-card .secondary { color: #f7ead0; background: #5c4931; }
+
+.freight-progress {
+  grid-column: 1 / -1;
+  position: relative;
+  overflow: hidden;
+  min-height: 28px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.08);
+}
+
+.freight-progress span { position: relative; z-index: 1; color: #f6f1df !important; }
+.freight-progress i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(203, 238, 88, 0.2);
+  transition: width .25s ease;
+}
+
+.freight-service-status {
+  padding: 9px 11px;
+  border-radius: 9px;
+  color: #263d33;
+  background: #e4c77f;
+  font-weight: 800;
+  font-size: 11px;
+}
 
 .inventory-overlay {
   z-index: 58;
