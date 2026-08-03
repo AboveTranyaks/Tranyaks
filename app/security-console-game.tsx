@@ -26,7 +26,7 @@ type FishingRodId = "basic" | "spinning" | "premium";
 type FishingLineId = "nylon" | "braid" | "fluorocarbon";
 type FishId = "crucian" | "perch" | "carp" | "pike" | "catfish";
 type FishingPhase = "idle" | "casting" | "waiting" | "bite" | "reeling" | "result";
-type InventoryItemId = "battery" | "leaflet" | "snack" | "coffee" | "water" | "toolkit" | "sensor" | "camera" | "cat_food" | "dog_food" | "grain" | "rod_basic" | "rod_spinning" | "rod_premium" | "line_nylon" | "line_braid" | "line_fluoro" | "bait_worm" | "bait_corn" | "lure_fly" | "fishing_box" | "fish_crucian" | "fish_perch" | "fish_carp" | "fish_pike" | "fish_catfish";
+type InventoryItemId = "battery" | "leaflet" | "snack" | "coffee" | "water" | "cola" | "sprite" | "tea" | "mineral_water" | "burger" | "hotdog" | "chips" | "sandwich" | "buterbrod" | "toolkit" | "sensor" | "camera" | "cat_food" | "dog_food" | "grain" | "rod_basic" | "rod_spinning" | "rod_premium" | "line_nylon" | "line_braid" | "line_fluoro" | "bait_worm" | "bait_corn" | "lure_fly" | "fishing_box" | "fish_crucian" | "fish_perch" | "fish_carp" | "fish_pike" | "fish_catfish";
 type InventoryStack = { id: InventoryItemId; amount: number };
 type FreightJobStatus = "available" | "active" | "completed";
 type FreightJob = {
@@ -517,7 +517,16 @@ const INVENTORY_ITEMS: Record<InventoryItemId, { name: string; slots: number; we
   leaflet: { name: "Буклет", slots: 1, weight: 0.05, icon: "▧" },
   snack: { name: "Снек", slots: 1, weight: 0.2, icon: "◆" },
   coffee: { name: "Кофе", slots: 1, weight: 0.3, icon: "☕" },
-  water: { name: "Вода", slots: 1, weight: 0.5, icon: "●" },
+  water: { name: "Вода", slots: 1, weight: 0.5, icon: "💧" },
+  cola: { name: "Кола", slots: 1, weight: 0.5, icon: "🥤" },
+  sprite: { name: "Спрайт", slots: 1, weight: 0.5, icon: "🟢" },
+  tea: { name: "Чай", slots: 1, weight: 0.35, icon: "🍵" },
+  mineral_water: { name: "Минеральная вода", slots: 1, weight: 0.5, icon: "🫧" },
+  burger: { name: "Бургер", slots: 1, weight: 0.35, icon: "🍔" },
+  hotdog: { name: "Хот-дог", slots: 1, weight: 0.3, icon: "🌭" },
+  chips: { name: "Чипсы", slots: 1, weight: 0.15, icon: "🍟" },
+  sandwich: { name: "Сэндвич", slots: 1, weight: 0.3, icon: "🥪" },
+  buterbrod: { name: "Бутерброд", slots: 1, weight: 0.25, icon: "🍞" },
   toolkit: { name: "Набор инструментов", slots: 2, weight: 3.4, icon: "⚒" },
   sensor: { name: "Датчик охраны", slots: 2, weight: 0.8, icon: "◉" },
   camera: { name: "Камера наблюдения", slots: 3, weight: 1.6, icon: "▣" },
@@ -870,6 +879,20 @@ const FOOD_STORES = [
   { id: "pervorechenskoe", name: "Продукты «У дома»", x: 3, z: -15.8 },
   { id: "dinskaya", name: "Супермаркет «Динской»", x: 3995, z: -18 },
 ] as const;
+
+const FOOD_STORE_PRODUCTS: { id: InventoryItemId; category: "drink" | "food"; price: number; restore: number }[] = [
+  { id: "cola", category: "drink", price: 75, restore: 32 },
+  { id: "sprite", category: "drink", price: 75, restore: 32 },
+  { id: "tea", category: "drink", price: 55, restore: 28 },
+  { id: "coffee", category: "drink", price: 65, restore: 24 },
+  { id: "mineral_water", category: "drink", price: 50, restore: 38 },
+  { id: "water", category: "drink", price: 35, restore: 40 },
+  { id: "burger", category: "food", price: 180, restore: 48 },
+  { id: "hotdog", category: "food", price: 130, restore: 38 },
+  { id: "chips", category: "food", price: 90, restore: 22 },
+  { id: "buterbrod", category: "food", price: 75, restore: 28 },
+  { id: "sandwich", category: "food", price: 120, restore: 36 },
+];
 
 const OUTFITS: Outfit[] = [
   {
@@ -4462,19 +4485,21 @@ export default function SecurityConsoleGame() {
         return;
       }
       if (e.code === "KeyU" && modeRef.current === "world" && !e.repeat) {
-        const snack = inventoryRef.current.find((stack) => stack.id === "snack" && stack.amount > 0);
-        const coffee = inventoryRef.current.find((stack) => stack.id === "coffee" && stack.amount > 0);
-        const water = inventoryRef.current.find((stack) => stack.id === "water" && stack.amount > 0);
-        if (!snack && !coffee && !water) return flash("В рюкзаке нет еды или напитка");
-        const drink = water ? "water" : coffee ? "coffee" : null;
-        const id: InventoryItemId = hungerRef.current <= thirstRef.current && snack ? "snack" : drink ?? "snack";
+        const availableFood = FOOD_STORE_PRODUCTS.find((product) => product.category === "food" && inventoryRef.current.some((stack) => stack.id === product.id && stack.amount > 0));
+        const availableDrink = FOOD_STORE_PRODUCTS.find((product) => product.category === "drink" && inventoryRef.current.some((stack) => stack.id === product.id && stack.amount > 0));
+        const legacySnack = inventoryRef.current.some((stack) => stack.id === "snack" && stack.amount > 0);
+        if (!availableFood && !availableDrink && !legacySnack) return flash("В рюкзаке нет еды или напитка");
+        const product = hungerRef.current <= thirstRef.current && (availableFood || legacySnack)
+          ? availableFood ?? { id: "snack" as InventoryItemId, category: "food" as const, restore: 35 }
+          : availableDrink ?? availableFood ?? { id: "snack" as InventoryItemId, category: "food" as const, restore: 35 };
+        const id = product.id;
         const stack = inventoryRef.current.find((item) => item.id === id)!;
         const next = stack.amount === 1 ? inventoryRef.current.filter((item) => item.id !== id) : inventoryRef.current.map((item) => item.id === id ? { ...item, amount: item.amount - 1 } : item);
         inventoryRef.current = next;
         setInventory(next);
-        if (id === "snack") { hungerRef.current = clamp(hungerRef.current + 35, 0, 100); setHunger(hungerRef.current); }
-        else { thirstRef.current = clamp(thirstRef.current + (id === "water" ? 40 : 30), 0, 100); setThirst(thirstRef.current); }
-        flash(id === "snack" ? "Алексей перекусил · голод +35" : id === "water" ? "Алексей выпил воду · жажда +40" : "Алексей выпил кофе · жажда +30");
+        if (product.category === "food") { hungerRef.current = clamp(hungerRef.current + product.restore, 0, 100); setHunger(hungerRef.current); }
+        else { thirstRef.current = clamp(thirstRef.current + product.restore, 0, 100); setThirst(thirstRef.current); }
+        flash(`${INVENTORY_ITEMS[id].icon} ${INVENTORY_ITEMS[id].name} использован · ${product.category === "food" ? "голод" : "жажда"} +${product.restore}`);
         persistRef.current();
         return;
       }
@@ -5361,7 +5386,7 @@ export default function SecurityConsoleGame() {
         });
       });
       const busOperating = (engine.time >= 6 && engine.time < 23) || onBusRef.current;
-      const busClockActive = modeRef.current === "world" || modeRef.current === "busRide" || (modeRef.current === "pause" && onBusRef.current);
+      const busClockActive = modeRef.current === "world" || modeRef.current === "busRide" || modeRef.current === "taxiRide" || (modeRef.current === "pause" && onBusRef.current);
       const busGameTimeDelta = busClockActive ? (engine.time - lastBusGameTime + 24) % 24 : 0;
       lastBusGameTime = engine.time;
       bus.visible = busOperating;
@@ -6329,19 +6354,20 @@ export default function SecurityConsoleGame() {
     flash(`Покупка оформлена · −${price.toLocaleString("ru-RU")} ₽`);
   };
 
-  const buyFoodStoreItem = (item: "snack" | "water", amount = 1) => {
-    const unitPrice = item === "snack" ? 60 : 35;
-    const price = unitPrice * amount;
+  const buyFoodStoreItem = (productId: InventoryItemId) => {
+    const product = FOOD_STORE_PRODUCTS.find((item) => item.id === productId);
+    if (!product) return;
+    const price = product.price;
     if (moneyRef.current < price) return flash(`Не хватает ${(price - moneyRef.current).toLocaleString("ru-RU")} ₽`);
-    const nextInventory = inventoryRef.current.some((stack) => stack.id === item)
-      ? inventoryRef.current.map((stack) => stack.id === item ? { ...stack, amount: stack.amount + amount } : stack)
-      : [...inventoryRef.current, { id: item, amount }];
+    const nextInventory = inventoryRef.current.some((stack) => stack.id === productId)
+      ? inventoryRef.current.map((stack) => stack.id === productId ? { ...stack, amount: stack.amount + 1 } : stack)
+      : [...inventoryRef.current, { id: productId, amount: 1 }];
     inventoryRef.current = nextInventory;
     setInventory(nextInventory);
     moneyRef.current -= price;
     setMoney(moneyRef.current);
     persist(residentsRef.current, moneyRef.current, reputation);
-    flash(`${item === "snack" ? "Еда" : "Вода"} ×${amount} куплена · −${price.toLocaleString("ru-RU")} ₽`);
+    flash(`${INVENTORY_ITEMS[productId].icon} ${INVENTORY_ITEMS[productId].name} куплен · −${price.toLocaleString("ru-RU")} ₽`);
   };
 
   const closeBusinessMonth = () => {
@@ -6615,33 +6641,62 @@ export default function SecurityConsoleGame() {
     let previousX = taxi.position.x;
     let previousZ = taxi.position.z;
     let lastUiUpdateAt = 0;
+    let overtaking = false;
+    let overtakeUntilX = taxi.position.x;
     let animationFrame = 0;
     const animateRide = (now: number) => {
       const dt = Math.min((now - previousAt) / 1000, 0.08);
       previousAt = now;
       const residential = taxi.position.x < 450 || taxi.position.x > 3550;
       const speedLimit = (residential ? 40 : 90) / 3.6;
-      const obstacleAhead = (object: THREE.Object3D, laneTolerance: number, clearance: number) => {
+      const rightLaneZ = laneZForDirection(direction, 3.5);
+      const oppositeLaneZ = laneZForDirection(direction === 1 ? -1 : 1, 3.5);
+      const forwardDistanceTo = (object: THREE.Object3D) => (object.position.x - taxi.position.x) * direction;
+      const objectInLane = (object: THREE.Object3D, laneZ: number, laneTolerance: number, clearance: number) => {
         if (!object.visible) return false;
-        const forwardDistance = (object.position.x - taxi.position.x) * direction;
-        return forwardDistance > 0.4 && forwardDistance < clearance && Math.abs(object.position.z - taxi.position.z) < laneTolerance;
+        const forwardDistance = forwardDistanceTo(object);
+        return forwardDistance > 0.4 && forwardDistance < clearance && Math.abs(object.position.z - laneZ) < laneTolerance;
       };
       const stoppingDistance = 10 + currentSpeed * 1.65;
       const engine = engineRef.current;
-      const blocked =
-        Boolean(engine.player?.visible && obstacleAhead(engine.player, 3.2, stoppingDistance)) ||
-        Boolean(engine.car?.visible && obstacleAhead(engine.car, 3.8, stoppingDistance)) ||
-        Boolean(engine.bus?.visible && obstacleAhead(engine.bus, 4.5, stoppingDistance + 5)) ||
-        engine.traffic.some((vehicle) => obstacleAhead(vehicle.mesh, 3.5, stoppingDistance)) ||
-        engine.residents.some((resident) => Boolean(resident.mesh && obstacleAhead(resident.mesh, 2.8, stoppingDistance))) ||
-        engine.walkers.some((walker) => obstacleAhead(walker.mesh, 2.8, stoppingDistance)) ||
-        engine.busPassengers.some((passenger) => passenger.state !== "riding" && obstacleAhead(passenger.mesh, 2.8, stoppingDistance));
+      const vehicles = [
+        ...(engine.car?.visible ? [{ mesh: engine.car, direction: 0 }] : []),
+        ...(engine.bus?.visible ? [{ mesh: engine.bus, direction: busDirectionRef.current }] : []),
+        ...engine.traffic.map((vehicle) => ({ mesh: vehicle.mesh, direction: vehicle.direction })),
+      ];
+      const vehicleAhead = vehicles
+        .filter((vehicle) => vehicle.direction !== -direction && objectInLane(vehicle.mesh, rightLaneZ, 3.6, stoppingDistance))
+        .sort((a, b) => forwardDistanceTo(a.mesh) - forwardDistanceTo(b.mesh))[0];
+      const oncomingLaneClear = !vehicles.some((vehicle) =>
+        vehicle.direction === -direction &&
+        forwardDistanceTo(vehicle.mesh) > -12 &&
+        forwardDistanceTo(vehicle.mesh) < 95 &&
+        Math.abs(vehicle.mesh.position.z - oppositeLaneZ) < 3.8,
+      );
+      const pedestrianOnRightLane =
+        Boolean(engine.player?.visible && objectInLane(engine.player, rightLaneZ, 2.8, stoppingDistance)) ||
+        engine.residents.some((resident) => Boolean(resident.mesh && objectInLane(resident.mesh, rightLaneZ, 2.6, stoppingDistance))) ||
+        engine.walkers.some((walker) => objectInLane(walker.mesh, rightLaneZ, 2.6, stoppingDistance)) ||
+        engine.busPassengers.some((passenger) => passenger.state !== "riding" && objectInLane(passenger.mesh, rightLaneZ, 2.6, stoppingDistance));
+      if (!overtaking && vehicleAhead && !pedestrianOnRightLane && oncomingLaneClear) {
+        overtaking = true;
+        overtakeUntilX = vehicleAhead.mesh.position.x + direction * 14;
+      }
+      if (overtaking && (taxi.position.x - overtakeUntilX) * direction >= 0) overtaking = false;
+      const desiredLaneZ = overtaking ? oppositeLaneZ : rightLaneZ;
+      const pedestrianBlocked =
+        Boolean(engine.player?.visible && objectInLane(engine.player, desiredLaneZ, 2.8, stoppingDistance)) ||
+        engine.residents.some((resident) => Boolean(resident.mesh && objectInLane(resident.mesh, desiredLaneZ, 2.6, stoppingDistance))) ||
+        engine.walkers.some((walker) => objectInLane(walker.mesh, desiredLaneZ, 2.6, stoppingDistance)) ||
+        engine.busPassengers.some((passenger) => passenger.state !== "riding" && objectInLane(passenger.mesh, desiredLaneZ, 2.6, stoppingDistance));
+      const vehicleBlocked = vehicles.some((vehicle) => objectInLane(vehicle.mesh, desiredLaneZ, 3.6, stoppingDistance));
+      const blocked = pedestrianBlocked || vehicleBlocked;
       const targetSpeed = blocked ? 0 : speedLimit;
       const speedChange = (targetSpeed > currentSpeed ? 2.8 : 8.5) * dt;
       currentSpeed = THREE.MathUtils.lerp(currentSpeed, targetSpeed, clamp(speedChange / Math.max(1, Math.abs(targetSpeed - currentSpeed)), 0, 1));
       if (!blocked || currentSpeed > 0.15) progress = clamp(progress + currentSpeed * dt / Math.max(distance, 1), 0, 1);
       const x = THREE.MathUtils.lerp(taxiRide.start.x, taxiRide.destination.x, progress);
-      const z = laneZForDirection(direction, 3.5);
+      const z = THREE.MathUtils.lerp(taxi.position.z, desiredLaneZ, 1 - Math.pow(0.018, dt));
       taxi.position.set(x, 0, z);
       const moveX = x - previousX;
       const moveZ = z - previousZ;
@@ -7764,12 +7819,12 @@ export default function SecurityConsoleGame() {
               <article>
                 <h2>◆ Еда</h2>
                 <p>Покупка попадает в рюкзак. Нажмите U в мире, чтобы перекусить.</p>
-                <div><button onClick={() => buyFoodStoreItem("snack")}>1 порция · 60 ₽</button><button onClick={() => buyFoodStoreItem("snack", 3)}>3 порции · 180 ₽</button></div>
+                <div className="food-product-grid">{FOOD_STORE_PRODUCTS.filter((product) => product.category === "food").map((product) => <button key={product.id} onClick={() => buyFoodStoreItem(product.id)}><i>{INVENTORY_ITEMS[product.id].icon}</i><span><b>{INVENTORY_ITEMS[product.id].name}</b><small>{product.price} ₽ · голод +{product.restore}</small></span></button>)}</div>
               </article>
               <article>
-                <h2>● Питьевая вода</h2>
-                <p>Бутылка восстанавливает 40 единиц жажды. Использование — клавиша U.</p>
-                <div><button onClick={() => buyFoodStoreItem("water")}>1 бутылка · 35 ₽</button><button onClick={() => buyFoodStoreItem("water", 3)}>3 бутылки · 105 ₽</button></div>
+                <h2>💧 Напитки</h2>
+                <p>Кола, Спрайт, чай, кофе, минеральная и обычная вода. Использование — клавиша U.</p>
+                <div className="food-product-grid">{FOOD_STORE_PRODUCTS.filter((product) => product.category === "drink").map((product) => <button key={product.id} onClick={() => buyFoodStoreItem(product.id)}><i>{INVENTORY_ITEMS[product.id].icon}</i><span><b>{INVENTORY_ITEMS[product.id].name}</b><small>{product.price} ₽ · жажда +{product.restore}</small></span></button>)}</div>
               </article>
             </div>
             <footer><span>E у двери · открыть магазин　U · использовать еду или воду</span><button onClick={() => { setStoreMenu(null); setMode("world"); }}>Выйти</button></footer>

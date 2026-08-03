@@ -535,11 +535,29 @@ test("keeps taxis in their lane, yields safely, resets the camera, and enables g
 
   assert.match(source, /laneZForDirection\(direction, 3\.5\)/);
   assert.match(source, /const speedLimit = \(residential \? 40 : 90\) \/ 3\.6/);
-  assert.match(source, /const obstacleAhead = \(object: THREE\.Object3D/);
-  assert.match(source, /engine\.traffic\.some\(\(vehicle\) => obstacleAhead/);
+  assert.match(source, /const objectInLane = \(object: THREE\.Object3D/);
+  assert.match(source, /const vehicleBlocked = vehicles\.some/);
   assert.match(source, /camera\.position\.set\(cameraTarget\.x - 12 \* direction/);
   assert.match(source, /const FOOD_STORES = \[/);
   assert.match(source, /Войти в продуктовый магазин/);
-  assert.match(source, /buyFoodStoreItem\("water"/);
+  assert.match(source, /buyFoodStoreItem\(product\.id\)/);
   assert.match(source, /water: \{ name: "Вода"/);
+});
+
+test("keeps buses moving during taxi rides and provides safe overtaking with varied store products", async () => {
+  const [source, styles] = await Promise.all([readFile(sourceUrl, "utf8"), readFile(stylesUrl, "utf8")]);
+
+  assert.match(source, /modeRef\.current === "taxiRide"/);
+  assert.match(source, /let overtaking = false/);
+  assert.match(source, /const oncomingLaneClear/);
+  assert.match(source, /const desiredLaneZ = overtaking \? oppositeLaneZ : rightLaneZ/);
+  assert.match(source, /Кола/);
+  assert.match(source, /Спрайт/);
+  assert.match(source, /Минеральная вода/);
+  assert.match(source, /Бургер/);
+  assert.match(source, /Хот-дог/);
+  assert.match(source, /Чипсы/);
+  assert.match(source, /Бутерброд/);
+  assert.match(source, /Сэндвич/);
+  assert.match(styles, /\.food-product-grid/);
 });
