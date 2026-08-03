@@ -529,3 +529,17 @@ test("adds autopilot, physical taxi trips, hero needs, pause settings, and outer
   assert.match(styles, /\.pause-tabs/);
   assert.match(styles, /\.needs-row/);
 });
+
+test("keeps taxis in their lane, yields safely, resets the camera, and enables grocery shopping", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /laneZForDirection\(direction, 3\.5\)/);
+  assert.match(source, /const speedLimit = \(residential \? 40 : 90\) \/ 3\.6/);
+  assert.match(source, /const obstacleAhead = \(object: THREE\.Object3D/);
+  assert.match(source, /engine\.traffic\.some\(\(vehicle\) => obstacleAhead/);
+  assert.match(source, /camera\.position\.set\(cameraTarget\.x - 12 \* direction/);
+  assert.match(source, /const FOOD_STORES = \[/);
+  assert.match(source, /Войти в продуктовый магазин/);
+  assert.match(source, /buyFoodStoreItem\("water"/);
+  assert.match(source, /water: \{ name: "Вода"/);
+});
