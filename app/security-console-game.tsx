@@ -6514,13 +6514,12 @@ export default function SecurityConsoleGame() {
     const direction = taxiRide.destination.x >= taxiRide.start.x ? 1 : -1;
     const target = new THREE.Vector3(taxiRide.start.x, 0, taxiRide.start.z + (direction > 0 ? 3.2 : -3.2));
     let previousAt = performance.now();
-    const timer = window.setInterval(() => {
-      const now = performance.now();
+    let animationFrame = 0;
+    const animateArrival = (now: number) => {
       const dt = Math.min((now - previousAt) / 1000, 0.1);
       previousAt = now;
       const remaining = taxi.position.distanceTo(target);
       if (remaining <= 0.8) {
-        window.clearInterval(timer);
         taxi.position.copy(target);
         const offered: TaxiRideState = { ...taxiRide, stage: "offered" };
         taxiRideRef.current = offered;
@@ -6532,9 +6531,13 @@ export default function SecurityConsoleGame() {
       const step = Math.min(remaining, 13 * dt);
       const movement = target.clone().sub(taxi.position).normalize();
       taxi.position.addScaledVector(movement, step);
-      taxi.rotation.y = Math.atan2(movement.x, movement.z);
-    }, 40);
-    return () => window.clearInterval(timer);
+      const desiredYaw = Math.atan2(movement.x, movement.z);
+      const yawDelta = Math.atan2(Math.sin(desiredYaw - taxi.rotation.y), Math.cos(desiredYaw - taxi.rotation.y));
+      taxi.rotation.y += yawDelta * (1 - Math.pow(0.0004, dt));
+      animationFrame = window.requestAnimationFrame(animateArrival);
+    };
+    animationFrame = window.requestAnimationFrame(animateArrival);
+    return () => window.cancelAnimationFrame(animationFrame);
   }, [taxiRide?.stage]);
 
   useEffect(() => {
@@ -6546,28 +6549,35 @@ export default function SecurityConsoleGame() {
     const startedAt = performance.now() - taxiRide.progress * durationMs;
     let previousX = taxi.position.x;
     let previousZ = taxi.position.z;
-    const timer = window.setInterval(() => {
-      const progress = clamp((performance.now() - startedAt) / durationMs, 0, 1);
-      const smooth = progress * progress * (3 - 2 * progress);
-      const x = THREE.MathUtils.lerp(taxiRide.start.x, taxiRide.destination.x, smooth);
-      const directZ = THREE.MathUtils.lerp(taxiRide.start.z, taxiRide.destination.z, smooth);
+    let lastUiUpdateAt = 0;
+    let animationFrame = 0;
+    const animateRide = (now: number) => {
+      const progress = clamp((now - startedAt) / durationMs, 0, 1);
+      const x = THREE.MathUtils.lerp(taxiRide.start.x, taxiRide.destination.x, progress);
+      const directZ = THREE.MathUtils.lerp(taxiRide.start.z, taxiRide.destination.z, progress);
       const roadBlend = Math.sin(progress * Math.PI);
       const travelRightLane = taxiRide.destination.x >= taxiRide.start.x ? 3.5 : -3.5;
       const z = THREE.MathUtils.lerp(directZ, travelRightLane, roadBlend * 0.92);
       taxi.position.set(x, 0, z);
       const moveX = x - previousX;
       const moveZ = z - previousZ;
-      if (Math.hypot(moveX, moveZ) > 0.001) taxi.rotation.y = Math.atan2(moveX, moveZ);
+      if (Math.hypot(moveX, moveZ) > 0.001) {
+        const desiredYaw = Math.atan2(moveX, moveZ);
+        const yawDelta = Math.atan2(Math.sin(desiredYaw - taxi.rotation.y), Math.cos(desiredYaw - taxi.rotation.y));
+        taxi.rotation.y += yawDelta * 0.18;
+      }
       previousX = x;
       previousZ = z;
-      setPlayerPos({ x, z });
-      setTaxiRide((ride) => {
-        const nextRide = ride ? { ...ride, progress } : null;
-        taxiRideRef.current = nextRide;
-        return nextRide;
-      });
+      if (now - lastUiUpdateAt >= 120 || progress >= 1) {
+        lastUiUpdateAt = now;
+        setPlayerPos({ x, z });
+        setTaxiRide((ride) => {
+          const nextRide = ride ? { ...ride, progress } : null;
+          taxiRideRef.current = nextRide;
+          return nextRide;
+        });
+      }
       if (progress >= 1) {
-        window.clearInterval(timer);
         moneyRef.current -= taxiRide.price;
         setMoney(moneyRef.current);
         const player = engineRef.current.player;
@@ -6586,9 +6596,12 @@ export default function SecurityConsoleGame() {
         window.setTimeout(() => {
           if (!taxiRideRef.current && engineRef.current.taxi) engineRef.current.taxi.visible = false;
         }, 3000);
+        return;
       }
-    }, 80);
-    return () => window.clearInterval(timer);
+      animationFrame = window.requestAnimationFrame(animateRide);
+    };
+    animationFrame = window.requestAnimationFrame(animateRide);
+    return () => window.cancelAnimationFrame(animationFrame);
   }, [taxiRide?.stage]);
 
   const capturePhonePhoto = () => {

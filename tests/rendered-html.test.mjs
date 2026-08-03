@@ -509,6 +509,9 @@ test("adds autopilot, physical taxi trips, hero needs, pause settings, and outer
   assert.match(source, /taxiBoardRef\.current\(\)/);
   assert.match(source, /const focus = ridingBus \? bus : ridingTaxi \? taxi/);
   assert.match(source, /taxi\.position\.set\(x, 0, z\)/);
+  assert.match(source, /requestAnimationFrame\(animateArrival\)/);
+  assert.match(source, /requestAnimationFrame\(animateRide\)/);
+  assert.match(source, /now - lastUiUpdateAt >= 120/);
   assert.match(source, /Подойдите к машине и нажмите E/);
   assert.match(source, /Вы сидите на заднем сиденье/);
   assert.doesNotMatch(source, /setTimeout\(\(\) => \{\s*const player = engineRef\.current\.player;\s*if \(player\) player\.position\.set\(destination\.x/);
