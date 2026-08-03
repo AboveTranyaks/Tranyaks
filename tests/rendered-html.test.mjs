@@ -474,3 +474,22 @@ test("adds traffic yielding, bus stop requests, zero-start economy, and resident
   assert.match(source, /function makeBush/);
   assert.match(source, /makeBush\(scene, x - 4\.6/);
 });
+
+test("adds fishing progression, three mapped waters, and dealership vehicle pickup", async () => {
+  const [source, styles] = await Promise.all([readFile(sourceUrl, "utf8"), readFile(stylesUrl, "utf8")]);
+
+  assert.match(source, /const FISHING_SPOTS = \[/);
+  assert.match(source, /Пруд в Первореченском/);
+  assert.match(source, /Лесное озеро/);
+  assert.match(source, /Река Динская/);
+  assert.match(source, /const FISH_SPECIES/);
+  assert.match(source, /waitMs = 10000 \+ Math\.random\(\) \* 110000/);
+  assert.match(source, /ПКМ или пробел/);
+  assert.match(source, /клавишами A \/ D/);
+  assert.match(source, /className="world-fishing-point"/);
+  assert.match(source, /e\.code === "KeyG"/);
+  assert.match(source, /engineRef\.current\.car\.position\.set\(1390, 0, 34\)/);
+  assert.match(source, /pendingVehiclePickup/);
+  assert.match(styles, /\.fishing-overlay/);
+  assert.match(styles, /\.tension-meter/);
+});

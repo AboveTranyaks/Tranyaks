@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "inventory" | "pause" | "tariff" | "office" | "station" | "transit" | "busRide";
+type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "inventory" | "pause" | "tariff" | "office" | "station" | "transit" | "busRide" | "fishing";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
@@ -22,7 +22,11 @@ type PhoneApp = "home" | "taxi" | "freight" | "contacts" | "notifications" | "ca
 type PhoneTheme = "dark" | "light";
 type PhoneWallpaper = "village" | "night" | "forest";
 type CareerRole = "manager" | "carrier";
-type InventoryItemId = "battery" | "leaflet" | "snack" | "coffee" | "toolkit" | "sensor" | "camera" | "cat_food" | "dog_food" | "grain";
+type FishingRodId = "basic" | "spinning" | "premium";
+type FishingLineId = "nylon" | "braid" | "fluorocarbon";
+type FishId = "crucian" | "perch" | "carp" | "pike" | "catfish";
+type FishingPhase = "idle" | "casting" | "waiting" | "bite" | "reeling" | "result";
+type InventoryItemId = "battery" | "leaflet" | "snack" | "coffee" | "toolkit" | "sensor" | "camera" | "cat_food" | "dog_food" | "grain" | "rod_basic" | "rod_spinning" | "rod_premium" | "line_nylon" | "line_braid" | "line_fluoro" | "bait_worm" | "bait_corn" | "lure_fly" | "fishing_box" | "fish_crucian" | "fish_perch" | "fish_carp" | "fish_pike" | "fish_catfish";
 type InventoryStack = { id: InventoryItemId; amount: number };
 type FreightJobStatus = "available" | "active" | "completed";
 type FreightJob = {
@@ -262,6 +266,10 @@ type SaveData = {
   trunkInventory?: InventoryStack[];
   freightJobs?: FreightJob[];
   completedFreightJobs?: number;
+  fishingRod?: FishingRodId;
+  fishingLine?: FishingLineId;
+  fishCaught?: number;
+  pendingVehiclePickup?: VehicleId | null;
 };
 
 type SaveEnvelope = {
@@ -513,7 +521,50 @@ const INVENTORY_ITEMS: Record<InventoryItemId, { name: string; slots: number; we
   cat_food: { name: "Корм для кошек", slots: 1, weight: 0.5, icon: "◔" },
   dog_food: { name: "Корм для собак", slots: 1, weight: 0.8, icon: "◕" },
   grain: { name: "Зерно для птиц", slots: 1, weight: 0.6, icon: "✦" },
+  rod_basic: { name: "Простая удочка", slots: 2, weight: 1.2, icon: "╱" },
+  rod_spinning: { name: "Спиннинг", slots: 2, weight: 1, icon: "↗" },
+  rod_premium: { name: "Премиум-удилище", slots: 2, weight: 0.8, icon: "✧" },
+  line_nylon: { name: "Нейлоновая леска", slots: 1, weight: 0.1, icon: "⌁" },
+  line_braid: { name: "Плетёная леска", slots: 1, weight: 0.1, icon: "≋" },
+  line_fluoro: { name: "Флюрокарбон", slots: 1, weight: 0.1, icon: "≈" },
+  bait_worm: { name: "Червь", slots: 1, weight: 0.05, icon: "∿" },
+  bait_corn: { name: "Кукуруза", slots: 1, weight: 0.05, icon: "●" },
+  lure_fly: { name: "Искусственная мушка", slots: 1, weight: 0.03, icon: "⌁" },
+  fishing_box: { name: "Рыболовный ящик", slots: 2, weight: 2.5, icon: "▣" },
+  fish_crucian: { name: "Карась", slots: 1, weight: 0.6, icon: "🐟" },
+  fish_perch: { name: "Окунь", slots: 1, weight: 1, icon: "🐟" },
+  fish_carp: { name: "Карп", slots: 2, weight: 2.8, icon: "🐟" },
+  fish_pike: { name: "Щука", slots: 2, weight: 3.5, icon: "🐟" },
+  fish_catfish: { name: "Сом", slots: 2, weight: 7.5, icon: "🐟" },
 };
+
+const FISHING_SPOTS = [
+  { id: "pond", name: "Пруд в Первореченском", water: "Тихий деревенский пруд", x: 185, z: 150, difficulty: 1 },
+  { id: "lake", name: "Лесное озеро", water: "Скрытое место между поселениями", x: 2050, z: 145, difficulty: 3 },
+  { id: "river", name: "Река Динская", water: "Восточная окраина станицы", x: 4170, z: 150, difficulty: 2 },
+] as const;
+type FishingSpotId = (typeof FISHING_SPOTS)[number]["id"];
+
+const FISH_SPECIES: Record<FishId, { name: string; price: number; food: number; item: InventoryItemId }> = {
+  crucian: { name: "Карась", price: 50, food: 20, item: "fish_crucian" },
+  perch: { name: "Окунь", price: 120, food: 25, item: "fish_perch" },
+  carp: { name: "Карп", price: 300, food: 35, item: "fish_carp" },
+  pike: { name: "Щука", price: 450, food: 40, item: "fish_pike" },
+  catfish: { name: "Сом", price: 800, food: 50, item: "fish_catfish" },
+};
+
+const FISHING_SHOP: { item: InventoryItemId; price: number; rod?: FishingRodId; line?: FishingLineId }[] = [
+  { item: "rod_basic", price: 500, rod: "basic" },
+  { item: "rod_spinning", price: 1500, rod: "spinning" },
+  { item: "rod_premium", price: 5000, rod: "premium" },
+  { item: "line_nylon", price: 100, line: "nylon" },
+  { item: "line_braid", price: 400, line: "braid" },
+  { item: "line_fluoro", price: 600, line: "fluorocarbon" },
+  { item: "bait_worm", price: 20 },
+  { item: "bait_corn", price: 10 },
+  { item: "lure_fly", price: 50 },
+  { item: "fishing_box", price: 2000 },
+];
 const DEFAULT_FREIGHT_JOBS: FreightJob[] = [
   { id: "fresh-food", title: "Свежие продукты", cargo: "Овощи и молочная продукция", volume: 180, units: 5, unitWeight: 16, pickup: { label: "Продуктовая база", x: 3650, z: 112 }, delivery: { label: "Супермаркет «Динской»", x: 3995, z: -24 }, reward: 1400, deadlineHours: 4, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
   { id: "electronics", title: "Камеры для магазина", cargo: "Камеры, датчики и провода", volume: 120, units: 4, unitWeight: 12, pickup: { label: "Склад «Спектр»", x: 3710, z: 112 }, delivery: { label: "Магазин электроники", x: 4058, z: 44 }, reward: 1700, deadlineHours: 5, status: "available", loaded: false, loadedUnits: 0, deliveredUnits: 0 },
@@ -1074,6 +1125,10 @@ const DEFAULT_SAVE: SaveData = {
   trunkInventory: [],
   freightJobs: DEFAULT_FREIGHT_JOBS,
   completedFreightJobs: 0,
+  fishingRod: undefined,
+  fishingLine: undefined,
+  fishCaught: 0,
+  pendingVehiclePickup: null,
 };
 
 function checksum(data: SaveData) {
@@ -1152,6 +1207,10 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
       };
     }),
     completedFreightJobs: Math.max(0, value?.completedFreightJobs ?? 0),
+    fishingRod: value?.fishingRod === "basic" || value?.fishingRod === "spinning" || value?.fishingRod === "premium" ? value.fishingRod : undefined,
+    fishingLine: value?.fishingLine === "nylon" || value?.fishingLine === "braid" || value?.fishingLine === "fluorocarbon" ? value.fishingLine : undefined,
+    fishCaught: Math.max(0, value?.fishCaught ?? 0),
+    pendingVehiclePickup: value?.pendingVehiclePickup && VEHICLE_BY_ID[value.pendingVehiclePickup] ? value.pendingVehiclePickup : null,
     carFuel: value?.carFuel === undefined ? (ownedVehicles.length > 0 ? 20 : 0) : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
 }
@@ -2093,7 +2152,12 @@ export default function SecurityConsoleGame() {
   const [reputation, setReputation] = useState(initialSave.reputation);
   const [gameTime, setGameTime] = useState(initialSave.gameTime ?? 8.25);
   const [driving, setDriving] = useState(false);
+  const [cameraView, setCameraView] = useState<"third" | "first">("third");
+  const cameraViewRef = useRef<"third" | "first">("third");
+  const [speedLimiter, setSpeedLimiter] = useState(false);
+  const speedLimiterRef = useRef(false);
   const [nearCar, setNearCar] = useState(false);
+  const [trunkOpen, setTrunkOpen] = useState(false);
   const [nearest, setNearest] = useState<Resident | null>(null);
   const [nearestWalker, setNearestWalker] = useState<Walker | null>(null);
   const [nearStationId, setNearStationId] = useState<string | null>(null);
@@ -2181,6 +2245,26 @@ export default function SecurityConsoleGame() {
   const freightJobsRef = useRef(freightJobs);
   const [completedFreightJobs, setCompletedFreightJobs] = useState(initialSave.completedFreightJobs ?? 0);
   const completedFreightJobsRef = useRef(completedFreightJobs);
+  const [fishingRod, setFishingRod] = useState<FishingRodId | null>(initialSave.fishingRod ?? null);
+  const fishingRodRef = useRef<FishingRodId | null>(initialSave.fishingRod ?? null);
+  const [fishingLine, setFishingLine] = useState<FishingLineId | null>(initialSave.fishingLine ?? null);
+  const fishingLineRef = useRef<FishingLineId | null>(initialSave.fishingLine ?? null);
+  const [fishCaught, setFishCaught] = useState(initialSave.fishCaught ?? 0);
+  const fishCaughtRef = useRef(initialSave.fishCaught ?? 0);
+  const [fishingSpotId, setFishingSpotId] = useState<FishingSpotId>("pond");
+  const [fishingPhase, setFishingPhase] = useState<FishingPhase>("idle");
+  const fishingPhaseRef = useRef<FishingPhase>("idle");
+  const [castPower, setCastPower] = useState(0);
+  const castPowerRef = useRef(0);
+  const [fishingTension, setFishingTension] = useState(50);
+  const fishingTensionRef = useRef(50);
+  const [reelProgress, setReelProgress] = useState(0);
+  const reelProgressRef = useRef(0);
+  const [fishingMessage, setFishingMessage] = useState("Подготовьте снасти и сделайте заброс.");
+  const fishingTimerRef = useRef<number | null>(null);
+  const fishingActionRef = useRef<(action: "hook" | "cast-start" | "cast-release") => void>(() => undefined);
+  const [pendingVehiclePickup, setPendingVehiclePickup] = useState<VehicleId | null>(initialSave.pendingVehiclePickup ?? null);
+  const pendingVehiclePickupRef = useRef<VehicleId | null>(initialSave.pendingVehiclePickup ?? null);
   const [carriedFreight, setCarriedFreight] = useState<CarriedFreightUnit | null>(null);
   const carriedFreightRef = useRef<CarriedFreightUnit | null>(null);
   const [trolleyCargoUnits, setTrolleyCargoUnits] = useState(0);
@@ -2398,6 +2482,10 @@ export default function SecurityConsoleGame() {
         trunkInventory: trunkInventoryRef.current,
         freightJobs: freightJobsRef.current,
         completedFreightJobs: completedFreightJobsRef.current,
+        fishingRod: fishingRodRef.current ?? undefined,
+        fishingLine: fishingLineRef.current ?? undefined,
+        fishCaught: fishCaughtRef.current,
+        pendingVehiclePickup: pendingVehiclePickupRef.current,
       };
       const envelope = writeEnvelope(slot, saveName, save);
       setSaveSlots((current) => ({ ...current, [slot]: envelope }));
@@ -3227,6 +3315,33 @@ export default function SecurityConsoleGame() {
     const river = new THREE.Mesh(makeFlatRiverGeometry(curve), riverMat);
     river.receiveShadow = true;
     scene.add(river);
+
+    // Three distinct fishing locations: an easy village pond, a hidden forest
+    // lake and a wider river reach near Dinskaya. The docks are the interaction
+    // points so the player never needs to walk into the water mesh.
+    FISHING_SPOTS.forEach((spot, index) => {
+      {
+        const radius = spot.id === "pond" ? 25 : spot.id === "lake" ? 34 : 52;
+        const water = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius, radius, 0.14, 40),
+          new THREE.MeshStandardMaterial({ color: spot.id === "lake" ? 0x4f8790 : 0x5a9fac, roughness: 0.25, transparent: true, opacity: 0.9 }),
+        );
+        water.position.set(spot.x, -0.08, spot.z + 21);
+        water.receiveShadow = true;
+        scene.add(water);
+      }
+      box(scene, [2.7, 0.16, 10], [spot.x, 0.2, spot.z + 4.5], 0x80664a);
+      for (const side of [-1, 1]) box(scene, [0.16, 0.46, 10], [spot.x + side * 2.5, 0.34, spot.z + 4.5], 0x5f4b38);
+      const angler = makePerson([0x718e65, 0x6d8197, 0xa77c67][index]);
+      angler.scale.setScalar(0.78);
+      angler.position.set(spot.x - 4.2, 0, spot.z - 2);
+      angler.rotation.y = Math.PI;
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 3.8, 6), mat(0x493a2b));
+      rod.position.set(0.48, 1.4, 0.2);
+      rod.rotation.z = -0.55;
+      angler.add(rod);
+      scene.add(angler);
+    });
 
     // Trees stay on dry land; none are generated inside the river corridor.
     for (let i = 0; i < 160; i++) {
@@ -4129,7 +4244,15 @@ export default function SecurityConsoleGame() {
       }
       if (e.code === "KeyI" && modeRef.current === "world") {
         engine.keys.clear();
+        setTrunkOpen(false);
         setMode("inventory");
+        return;
+      }
+      if (e.code === "KeyG" && modeRef.current === "world" && !engine.driving && currentVehicleRef.current && engine.car?.visible && engine.player && engine.player.position.distanceTo(engine.car.position) < 6.5) {
+        engine.keys.clear();
+        setTrunkOpen(true);
+        setMode("inventory");
+        flash("Багажник открыт");
         return;
       }
       if ((e.code === "KeyI" || e.code === "Escape") && modeRef.current === "inventory") {
@@ -4182,10 +4305,36 @@ export default function SecurityConsoleGame() {
         document.querySelector<HTMLButtonElement>(".bus-board-button:not(:disabled)")?.click();
         return;
       }
+      if (e.code === "Escape" && modeRef.current === "fishing") {
+        engine.keys.clear();
+        if (fishingTimerRef.current) window.clearTimeout(fishingTimerRef.current);
+        fishingTimerRef.current = null;
+        fishingPhaseRef.current = "idle";
+        setFishingPhase("idle");
+        setMode("world");
+        return;
+      }
+      if ((e.code === "Space" || e.code === "KeyF") && modeRef.current === "fishing" && !e.repeat) {
+        fishingActionRef.current("hook");
+        return;
+      }
       if (e.code === "KeyR" && modeRef.current === "busRide" && !e.repeat) {
         busStopRequestedRef.current = true;
         setBusStopRequested(true);
         flash("Остановка запрошена · автобус остановится на ближайшем павильоне");
+        return;
+      }
+      if (e.code === "KeyC" && (engine.driving || modeRef.current === "busRide") && !e.repeat) {
+        const next = cameraViewRef.current === "third" ? "first" : "third";
+        cameraViewRef.current = next;
+        setCameraView(next);
+        flash(next === "first" ? "Вид из салона" : "Камера от третьего лица");
+        return;
+      }
+      if (e.code === "KeyK" && engine.driving && !e.repeat) {
+        speedLimiterRef.current = !speedLimiterRef.current;
+        setSpeedLimiter(speedLimiterRef.current);
+        flash(speedLimiterRef.current ? "Ограничитель скорости включён" : "Ограничитель скорости выключен");
         return;
       }
       if (e.code === "KeyE" && modeRef.current === "busRide" && busStopChoiceRef.current && !e.repeat) {
@@ -4196,6 +4345,18 @@ export default function SecurityConsoleGame() {
         const focus = engine.driving ? engine.car : engine.player;
         if (!focus) return;
         if (!engine.driving && freightInteractionRef.current()) return;
+        const closestFishingSpot = FISHING_SPOTS.reduce((closest, spot) =>
+          Math.hypot(focus.position.x - spot.x, focus.position.z - spot.z) < Math.hypot(focus.position.x - closest.x, focus.position.z - closest.z) ? spot : closest,
+        );
+        if (!engine.driving && Math.hypot(focus.position.x - closestFishingSpot.x, focus.position.z - closestFishingSpot.z) < 18) {
+          engine.keys.clear();
+          setFishingSpotId(closestFishingSpot.id);
+          fishingPhaseRef.current = "idle";
+          setFishingPhase("idle");
+          setFishingMessage("Выберите снасти, нажмите и удерживайте кнопку заброса.");
+          setMode("fishing");
+          return;
+        }
         const closestStation = GAS_STATIONS.reduce((closest, station) =>
           Math.hypot(focus.position.x - station.x, focus.position.z - station.z) <
           Math.hypot(focus.position.x - closest.x, focus.position.z - closest.z)
@@ -4245,7 +4406,14 @@ export default function SecurityConsoleGame() {
           engine.cameraInputAt = performance.now();
           player.visible = false;
           setDriving(true);
-          flash(`Вы сели в ${VEHICLE_BY_ID[currentVehicleRef.current].name.toLowerCase()}`);
+          if (pendingVehiclePickupRef.current === currentVehicleRef.current) {
+            pendingVehiclePickupRef.current = null;
+            setPendingVehiclePickup(null);
+            flash("Первая поездка: Алексей осматривает покупку и устраивается за рулём");
+            window.setTimeout(() => persistRef.current(), 0);
+          } else {
+            flash(`Вы сели в ${VEHICLE_BY_ID[currentVehicleRef.current].name.toLowerCase()}`);
+          }
           return;
         }
         if (engine.driving && Math.abs(engine.carSpeed) < 1.2) {
@@ -4321,6 +4489,10 @@ export default function SecurityConsoleGame() {
       if (document.hidden) clearInput();
     };
     const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 2 && modeRef.current === "fishing") {
+        fishingActionRef.current("hook");
+        return;
+      }
       if (e.button === 0 && engine.driving && modeRef.current === "world") {
         playVehicleHorn();
       }
@@ -4452,7 +4624,9 @@ export default function SecurityConsoleGame() {
         const wetGrip = weatherRef.current === "Дождь" || weatherRef.current === "Гроза" ? 0.78 : 1;
         const grip = gripBase * wetGrip * (handbrake ? 0.24 : 1);
         const damageSpeedFactor = engine.wear >= 70 ? 0.72 : engine.wear >= 35 ? 0.88 : 1;
-        const maxSpeed = (activeVehicle.maxSpeed / 3.6) * (1 + carUpgradeRef.current * 0.15) * damageSpeedFactor;
+        const roadLimit = Math.abs(car.position.z) < 8 && (car.position.x < 450 || car.position.x > 3550) ? 60 : 90;
+        const vehicleMaximum = (activeVehicle.maxSpeed / 3.6) * (1 + carUpgradeRef.current * 0.15) * damageSpeedFactor;
+        const maxSpeed = speedLimiterRef.current ? Math.min(vehicleMaximum, roadLimit / 3.6) : vehicleMaximum;
         const acceleration = 6.2 * (1 + carUpgradeRef.current * 0.12) * (surface === "Трава" ? 0.72 : 1);
         if (throttle !== 0 && engine.fuel > 0) {
           const directionPenalty = Math.sign(throttle) !== Math.sign(engine.carSpeed) && Math.abs(engine.carSpeed) > 1 ? 1.65 : 1;
@@ -5105,6 +5279,13 @@ export default function SecurityConsoleGame() {
 
       const target = focus.position.clone();
       target.y += ridingBus ? 2.35 : engine.driving ? 2.2 : 3.0;
+      if (cameraViewRef.current === "first" && (ridingBus || engine.driving)) {
+        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(focus.quaternion);
+        const seatOffset = new THREE.Vector3(ridingBus ? 0.7 : -0.58, ridingBus ? 2.35 : 1.65, ridingBus ? 1.4 : 0.55).applyQuaternion(focus.quaternion);
+        const eye = focus.position.clone().add(seatOffset);
+        camera.position.lerp(eye, 1 - Math.pow(0.0004, dt));
+        camera.lookAt(eye.clone().add(forward.multiplyScalar(18)).add(new THREE.Vector3(0, Math.sin(engine.pitch - 0.45) * 8, 0)));
+      } else {
       const distance = ridingBus ? clamp(engine.zoom * 0.42, 1.5, 6) : engine.zoom + (engine.driving ? 4 : 0);
       const cameraOffset = new THREE.Vector3(
         Math.sin(engine.yaw) * Math.cos(engine.pitch) * distance,
@@ -5113,6 +5294,7 @@ export default function SecurityConsoleGame() {
       );
       camera.position.lerp(target.clone().add(cameraOffset), 1 - Math.pow(0.0008, dt));
       camera.lookAt(target);
+      }
 
       uiTick += dt;
       statisticsTick += dt;
@@ -5674,12 +5856,12 @@ export default function SecurityConsoleGame() {
     setCurrentVehicle(vehicle.id);
     setRentalActive(false);
     setMoney(nextMoney);
+    pendingVehiclePickupRef.current = vehicle.id;
+    setPendingVehiclePickup(vehicle.id);
     if (engineRef.current.car) {
       engineRef.current.car.visible = true;
-      if (firstVehicle && engineRef.current.player) {
-        engineRef.current.car.position.set(engineRef.current.player.position.x + 6, 0, engineRef.current.player.position.z);
-        engineRef.current.car.rotation.y = Math.PI / 2;
-      }
+      engineRef.current.car.position.set(1390, 0, 34);
+      engineRef.current.car.rotation.y = Math.PI / 2;
     }
     if (firstVehicle) {
       engineRef.current.fuel = 20;
@@ -5689,7 +5871,7 @@ export default function SecurityConsoleGame() {
     if (used) engineRef.current.wear = 30 + ((vehicle.price / 1000) % 21);
     persist(residentsRef.current, nextMoney, reputation);
     updateDailyChallenge("upgrades");
-    flash(`${vehicle.name} куплен${used ? " с пробегом" : ""}`);
+    flash(`${vehicle.name} куплен${used ? " с пробегом" : ""} · заберите машину на стоянке автосалона`);
   };
 
   const tradeInCurrentVehicle = () => {
@@ -6174,8 +6356,148 @@ export default function SecurityConsoleGame() {
     stacks.reduce((sum, stack) => sum + INVENTORY_ITEMS[stack.id].slots * stack.amount, 0);
   const inventoryWeight = (stacks: InventoryStack[]) =>
     stacks.reduce((sum, stack) => sum + INVENTORY_ITEMS[stack.id].weight * stack.amount, 0);
+  const changeInventoryItem = (id: InventoryItemId, delta: number) => {
+    const current = inventoryRef.current;
+    const stack = current.find((item) => item.id === id);
+    if (delta > 0 && inventorySlotsUsed(current) + INVENTORY_ITEMS[id].slots * delta > (current.some((item) => item.id === "fishing_box") ? 20 : 10)) return false;
+    if (delta < 0 && (!stack || stack.amount < Math.abs(delta))) return false;
+    const next = stack
+      ? stack.amount + delta > 0
+        ? current.map((item) => item.id === id ? { ...item, amount: item.amount + delta } : item)
+        : current.filter((item) => item.id !== id)
+      : [...current, { id, amount: delta }];
+    inventoryRef.current = next;
+    setInventory(next);
+    return true;
+  };
+
+  const buyFishingGear = (offer: (typeof FISHING_SHOP)[number]) => {
+    if (moneyRef.current < offer.price) return flash(`Не хватает ${(offer.price - moneyRef.current).toLocaleString("ru-RU")} ₽`);
+    if (!changeInventoryItem(offer.item, 1)) return flash("В рюкзаке нет места для покупки");
+    const nextMoney = moneyRef.current - offer.price;
+    moneyRef.current = nextMoney;
+    setMoney(nextMoney);
+    if (offer.rod) {
+      fishingRodRef.current = offer.rod;
+      setFishingRod(offer.rod);
+    }
+    if (offer.line) {
+      fishingLineRef.current = offer.line;
+      setFishingLine(offer.line);
+    }
+    flash(`${INVENTORY_ITEMS[offer.item].name} куплен${offer.rod ? "о и экипировано" : offer.line ? "а и установлена" : ""}`);
+    persistRef.current();
+  };
+
+  const completeFishingCatch = () => {
+    const spot = FISHING_SPOTS.find((item) => item.id === fishingSpotId) ?? FISHING_SPOTS[0];
+    const rodBonus = fishingRodRef.current === "premium" ? 0.2 : fishingRodRef.current === "spinning" ? 0.1 : 0;
+    const roll = Math.random() + rodBonus + spot.difficulty * 0.03;
+    const fish: FishId = roll > 1.08 && spot.id === "lake" ? "catfish" : roll > 0.9 ? "pike" : roll > 0.68 ? "carp" : roll > 0.38 ? "perch" : "crucian";
+    const species = FISH_SPECIES[fish];
+    if (!changeInventoryItem(species.item, 1)) {
+      fishingPhaseRef.current = "result";
+      setFishingPhase("result");
+      setFishingMessage(`${species.name} пойман, но в рюкзаке нет места — рыба отпущена.`);
+      return;
+    }
+    fishCaughtRef.current += 1;
+    setFishCaught(fishCaughtRef.current);
+    fishingPhaseRef.current = "result";
+    setFishingPhase("result");
+    setFishingMessage(`${species.name} пойман! Цена продажи: ${species.price} ₽.`);
+    flash(`Улов: ${species.name} · всего поймано ${fishCaughtRef.current}`);
+    persistRef.current();
+  };
+
+  const fishingAction = (action: "hook" | "cast-start" | "cast-release") => {
+    if (action === "hook") {
+      if (fishingPhaseRef.current !== "bite") return;
+      if (fishingTimerRef.current) window.clearTimeout(fishingTimerRef.current);
+      fishingPhaseRef.current = "reeling";
+      fishingTensionRef.current = 50;
+      reelProgressRef.current = 0;
+      setFishingPhase("reeling");
+      setFishingTension(50);
+      setReelProgress(0);
+      setFishingMessage("Вываживание: удерживайте натяжение в зелёной зоне клавишами A / D.");
+      return;
+    }
+    if (action === "cast-start") {
+      if (!fishingRodRef.current || !fishingLineRef.current) return flash("Купите и экипируйте удочку и леску");
+      const bait = (["bait_worm", "bait_corn", "lure_fly"] as InventoryItemId[]).find((id) => inventoryRef.current.some((stack) => stack.id === id && stack.amount > 0));
+      if (!bait) return flash("Для заброса нужна наживка");
+      fishingPhaseRef.current = "casting";
+      castPowerRef.current = 0;
+      setFishingPhase("casting");
+      setCastPower(0);
+      return;
+    }
+    if (fishingPhaseRef.current !== "casting") return;
+    const bait = (["bait_worm", "bait_corn", "lure_fly"] as InventoryItemId[]).find((id) => inventoryRef.current.some((stack) => stack.id === id && stack.amount > 0));
+    if (!bait || castPowerRef.current < 5) return;
+    changeInventoryItem(bait, -1);
+    fishingPhaseRef.current = "waiting";
+    setFishingPhase("waiting");
+    setFishingMessage(`Поплавок на воде · дальность заброса ${Math.round(castPowerRef.current)}%. Ждите поклёвку…`);
+    const waitMs = 10000 + Math.random() * 110000;
+    fishingTimerRef.current = window.setTimeout(() => {
+      fishingPhaseRef.current = "bite";
+      setFishingPhase("bite");
+      setFishingMessage("ПОКЛЁВКА! Нажмите ПКМ или пробел, чтобы подсечь.");
+      fishingTimerRef.current = window.setTimeout(() => {
+        if (fishingPhaseRef.current === "bite") {
+          fishingPhaseRef.current = "idle";
+          setFishingPhase("idle");
+          setFishingMessage("Рыба сорвалась. Попробуйте ещё раз.");
+        }
+      }, 4200);
+    }, waitMs);
+  };
+  fishingActionRef.current = fishingAction;
+
+  useEffect(() => {
+    if (fishingPhase !== "casting") return;
+    const timer = window.setInterval(() => {
+      castPowerRef.current = castPowerRef.current >= 100 ? 20 : castPowerRef.current + 3;
+      setCastPower(castPowerRef.current);
+    }, 60);
+    return () => window.clearInterval(timer);
+  }, [fishingPhase]);
+
+  useEffect(() => {
+    if (fishingPhase !== "reeling") return;
+    const timer = window.setInterval(() => {
+      const keys = engineRef.current.keys;
+      const input = (keys.has("right") ? 1 : 0) - (keys.has("left") ? 1 : 0);
+      const nextTension = clamp(fishingTensionRef.current + input * 6 + (Math.random() - 0.5) * 12, 0, 100);
+      fishingTensionRef.current = nextTension;
+      setFishingTension(nextTension);
+      if (nextTension < 8 || nextTension > 92) {
+        fishingPhaseRef.current = "idle";
+        setFishingPhase("idle");
+        setFishingMessage("Леска ослабла или порвалась — рыба ушла.");
+        return;
+      }
+      const safeBonus = nextTension >= 35 && nextTension <= 65 ? 4 : 1.5;
+      reelProgressRef.current = Math.min(100, reelProgressRef.current + safeBonus);
+      setReelProgress(reelProgressRef.current);
+      if (reelProgressRef.current >= 100) completeFishingCatch();
+    }, 140);
+    return () => window.clearInterval(timer);
+  }, [fishingPhase, fishingSpotId]);
+
+  const sellFish = (fish: FishId) => {
+    const species = FISH_SPECIES[fish];
+    if (!changeInventoryItem(species.item, -1)) return;
+    moneyRef.current += species.price;
+    setMoney(moneyRef.current);
+    flash(`${species.name} продан · +${species.price} ₽`);
+    persistRef.current();
+  };
   const transferInventoryItem = (id: InventoryItemId, toTrunk: boolean) => {
     if (!currentVehicleRef.current) return flash("Рядом нет личного автомобиля");
+    if (!trunkOpen) return flash("Подойдите к задней части автомобиля и откройте багажник клавишей G");
     const source = toTrunk ? inventoryRef.current : trunkInventoryRef.current;
     const destination = toTrunk ? trunkInventoryRef.current : inventoryRef.current;
     const sourceStack = source.find((stack) => stack.id === id);
@@ -6606,6 +6928,7 @@ export default function SecurityConsoleGame() {
     (taxiTier === "economy" ? 100 : taxiTier === "comfort" ? 250 : 500) +
     taxiDistanceKm * (taxiTier === "economy" ? 10 : taxiTier === "comfort" ? 15 : 20),
   );
+  const nearbyFishingSpot = !driving ? FISHING_SPOTS.find((spot) => Math.hypot(playerPos.x - spot.x, playerPos.z - spot.z) < 18) : undefined;
 
   return (
     <main
@@ -6662,7 +6985,7 @@ export default function SecurityConsoleGame() {
           )}
           <div className="controls-hint">
             {driving ? (
-              <><kbd>WASD</kbd> вести <kbd>Space</kbd> ручник <kbd>ПКМ</kbd> осмотреться <kbd>E</kbd> выйти</>
+              <><kbd>WASD</kbd> вести <kbd>Space</kbd> ручник <kbd>C</kbd> {cameraView === "first" ? "вид снаружи" : "вид из салона"} <kbd>K</kbd> лимит {speedLimiter ? "вкл." : "выкл."} <kbd>E</kbd> выйти</>
             ) : (
               <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>I</kbd> инвентарь <kbd>Tab</kbd> карта <kbd>P</kbd> планшет <kbd>O</kbd> телефон</>
             )}
@@ -6758,13 +7081,16 @@ export default function SecurityConsoleGame() {
               <span>Сесть на скамейку · восстановить энергию</span>
             </div>
           )}
-          {mode === "world" && !nearStationId && !nearBusStopId && !nearBench && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
+          {mode === "world" && !nearStationId && !nearBusStopId && !nearBench && !driving && nearbyFishingSpot && (
+            <div className="interaction-prompt"><span className="key">E</span><span>Рыбачить · {nearbyFishingSpot.name}</span></div>
+          )}
+          {mode === "world" && !nearStationId && !nearBusStopId && !nearBench && !nearbyFishingSpot && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>{driving ? "Выйти из машины" : nearest ? `Обсудить договор · ${nearest.name}` : `Поговорить на улице · ${nearestWalker?.name}`}</span>
             </div>
           )}
-          {mode === "world" && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearBench && !nearStationId && !nearBusStopId && (
+          {mode === "world" && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearBench && !nearStationId && !nearBusStopId && !nearbyFishingSpot && (
             <div className="interaction-prompt"><span className="key">E</span><span>Сесть в {VEHICLE_BY_ID[currentVehicle].name.toLowerCase()}</span></div>
           )}
         </div>
@@ -6932,7 +7258,7 @@ export default function SecurityConsoleGame() {
       {mode === "inventory" && (
         <section className="overlay inventory-overlay">
           <div className="inventory-shell">
-            <header><div><small>Рюкзак и багажник</small><h1>Инвентарь Алексея</h1></div><button onClick={() => setMode("world")}>×</button></header>
+            <header><div><small>{trunkOpen ? "Рюкзак и открытый багажник" : "Личный рюкзак"}</small><h1>Инвентарь Алексея</h1></div><button onClick={() => setMode("world")}>×</button></header>
             <div className="inventory-stats">
               <span>Рюкзак <b>{inventorySlotsUsed(inventory)} / 10 слотов</b></span>
               <span>Вес <b>{inventoryWeight(inventory).toFixed(1)} / 10 кг</b></span>
@@ -6942,17 +7268,56 @@ export default function SecurityConsoleGame() {
               <article>
                 <h2>Рюкзак</h2>
                 <div className="inventory-grid">
-                  {inventory.length ? inventory.map((stack) => <button key={stack.id} onClick={() => transferInventoryItem(stack.id, true)}><i>{INVENTORY_ITEMS[stack.id].icon}</i><b>{INVENTORY_ITEMS[stack.id].name}</b><span>×{stack.amount} · в багажник →</span></button>) : <p>Рюкзак пуст.</p>}
+                  {inventory.length ? inventory.map((stack) => <button key={stack.id} onClick={() => transferInventoryItem(stack.id, true)}><i>{INVENTORY_ITEMS[stack.id].icon}</i><b>{INVENTORY_ITEMS[stack.id].name}</b><span>×{stack.amount}{trunkOpen ? " · в багажник →" : ""}</span></button>) : <p>Рюкзак пуст.</p>}
                 </div>
               </article>
               <article>
-                <h2>Багажник · {currentVehicle ? `${VEHICLE_BY_ID[currentVehicle].cargo ?? 100} ед.` : "закрыт"}</h2>
+                <h2>Багажник · {trunkOpen && currentVehicle ? `${VEHICLE_BY_ID[currentVehicle].cargo ?? 100} ед.` : "закрыт"}</h2>
                 <div className="inventory-grid">
-                  {trunkInventory.length ? trunkInventory.map((stack) => <button key={stack.id} onClick={() => transferInventoryItem(stack.id, false)}><i>{INVENTORY_ITEMS[stack.id].icon}</i><b>{INVENTORY_ITEMS[stack.id].name}</b><span>← забрать · ×{stack.amount}</span></button>) : <p>В багажнике нет мелких предметов.</p>}
+                  {!trunkOpen ? <p>Подойдите к задней части машины и нажмите G.</p> : trunkInventory.length ? trunkInventory.map((stack) => <button key={stack.id} onClick={() => transferInventoryItem(stack.id, false)}><i>{INVENTORY_ITEMS[stack.id].icon}</i><b>{INVENTORY_ITEMS[stack.id].name}</b><span>← забрать · ×{stack.amount}</span></button>) : <p>В багажнике нет мелких предметов.</p>}
                 </div>
               </article>
             </div>
             <footer><span>I / Esc · закрыть</span><button onClick={() => setMode("world")}>Вернуться в мир</button></footer>
+          </div>
+        </section>
+      )}
+
+      {mode === "fishing" && (
+        <section className="overlay fishing-overlay">
+          <div className="fishing-shell">
+            <header>
+              <div><small>Рыбалка · необязательное занятие</small><h1>{FISHING_SPOTS.find((spot) => spot.id === fishingSpotId)?.name}</h1><p>{FISHING_SPOTS.find((spot) => spot.id === fishingSpotId)?.water}</p></div>
+              <button onClick={() => { if (fishingTimerRef.current) window.clearTimeout(fishingTimerRef.current); fishingPhaseRef.current = "idle"; setFishingPhase("idle"); setMode("world"); }}>×</button>
+            </header>
+            <div className="fishing-layout">
+              <article className="fishing-action-card">
+                <div className={`fishing-water phase-${fishingPhase}`}><span className="fishing-float">●</span><i /><b>{fishingPhase === "bite" ? "!" : ""}</b></div>
+                <h2>{fishingPhase === "idle" ? "Готовы к забросу" : fishingPhase === "casting" ? "Выберите силу" : fishingPhase === "waiting" ? "Ожидание поклёвки" : fishingPhase === "bite" ? "Подсекайте!" : fishingPhase === "reeling" ? "Вываживание" : "Улов"}</h2>
+                <p className={fishingPhase === "bite" ? "bite-message" : ""}>{fishingMessage}</p>
+                {(fishingPhase === "idle" || fishingPhase === "result" || fishingPhase === "casting") && <>
+                  <div className="cast-meter"><i style={{ width: `${castPower}%` }} /></div>
+                  <button className="primary-btn cast-button" onPointerDown={() => fishingAction("cast-start")} onPointerUp={() => fishingAction("cast-release")} onPointerLeave={() => fishingPhaseRef.current === "casting" && fishingAction("cast-release")}>Удерживать для заброса</button>
+                </>}
+                {fishingPhase === "bite" && <button className="primary-btn hook-button" onClick={() => fishingAction("hook")}>Подсечь · ПКМ / пробел</button>}
+                {fishingPhase === "reeling" && <div className="reeling-panel">
+                  <div className="tension-meter"><i className="safe" /><b style={{ left: `${fishingTension}%` }} /></div>
+                  <span>Натяжение {Math.round(fishingTension)}% · A / D</span>
+                  <div className="reel-meter"><i style={{ width: `${reelProgress}%` }} /></div>
+                  <span>Рыба у берега: {Math.round(reelProgress)}%</span>
+                </div>}
+              </article>
+              <aside>
+                <section className="fishing-gear"><h2>Снасти</h2><p>Удочка: <b>{fishingRod ? INVENTORY_ITEMS[`rod_${fishingRod}` as InventoryItemId].name : "не выбрана"}</b><br />Леска: <b>{fishingLine ? fishingLine === "fluorocarbon" ? "Флюрокарбон" : fishingLine === "braid" ? "Плетёнка" : "Нейлон" : "не выбрана"}</b></p><span>Поймано за карьеру: {fishCaught}</span></section>
+                <section className="fishing-shop"><h2>Рыбацкая лавка</h2><div>{FISHING_SHOP.map((offer) => <button key={offer.item} onClick={() => buyFishingGear(offer)}><i>{INVENTORY_ITEMS[offer.item].icon}</i><span><b>{INVENTORY_ITEMS[offer.item].name}</b><small>{offer.price.toLocaleString("ru-RU")} ₽</small></span></button>)}</div></section>
+                <section className="fish-creel"><h2>Садок</h2>{(Object.keys(FISH_SPECIES) as FishId[]).map((fish) => {
+                  const species = FISH_SPECIES[fish];
+                  const amount = inventory.find((stack) => stack.id === species.item)?.amount ?? 0;
+                  return amount > 0 ? <div key={fish}><span>🐟 {species.name} ×{amount}</span><button onClick={() => sellFish(fish)}>Продать · {species.price} ₽</button></div> : null;
+                })}<small>Рыбу также можно приготовить у костра — восстановление голода будет добавлено вместе с системой потребностей.</small></section>
+              </aside>
+            </div>
+            <footer><span>ESC · закончить рыбалку</span><span>ПКМ / пробел · подсечка</span><span>A / D · натяжение лески</span></footer>
           </div>
         </section>
       )}
@@ -7425,6 +7790,7 @@ export default function SecurityConsoleGame() {
                       <small>{vehicle.className}</small><h3>{vehicle.name}</h3><p>{vehicle.description}</p>
                       <div className="vehicle-specs"><span>{vehicle.maxSpeed} км/ч</span><span>{vehicle.fuelUse} л/100 км</span><span>{vehicle.commercial ? `${vehicle.cargo} груз. ед.` : `${vehicle.capacity} мест`}</span></div>
                       <b>{vehicle.price.toLocaleString("ru-RU")} ₽ <small>· б/у {vehicle.usedPrice.toLocaleString("ru-RU")} ₽</small></b>
+                      {pendingVehiclePickup === vehicle.id && <em className="vehicle-pickup-status">Новый · требуется забрать у автосалона</em>}
                       <div><button onClick={() => buyVehicle(vehicle)}>{owned ? currentVehicle === vehicle.id ? "Выбрано" : "Выбрать" : "Купить новую"}</button>{!owned && <button onClick={() => buyVehicle(vehicle, true)}>Купить б/у</button>}</div>
                     </article>;
                   })}
@@ -7579,6 +7945,7 @@ export default function SecurityConsoleGame() {
               {mapLayers.points && WORLD_KEY_POINTS.map((point) => (
                 <button key={`map-point-${point.id}`} className={`world-point world-point-${point.kind}`} title={point.label} onClick={() => { setSelectedMapObject(point.label); setMapWaypoint({ x: point.x, z: point.z, label: point.label }); }} style={{ left: worldMapX(point.x), top: worldMapZ(point.z) }}>{point.short}</button>
               ))}
+              {mapLayers.points && FISHING_SPOTS.map((spot) => <button key={`fishing-${spot.id}`} className="world-fishing-point" title={spot.name} onClick={() => { setSelectedMapObject(`${spot.name} · ${spot.water}`); setMapWaypoint({ x: spot.x, z: spot.z, label: spot.name }); }} style={{ left: worldMapX(spot.x), top: worldMapZ(spot.z) }}>🐟</button>)}
               {quests.filter((quest) => quest.tracked && quest.status === "active").map((progress) => {
                 const definition = QUESTS.find((quest) => quest.id === progress.id);
                 if (!definition) return null;
@@ -7602,6 +7969,7 @@ export default function SecurityConsoleGame() {
               <div><i className="legend-road" /><span>Главный асфальт</span></div>
               <div><i className="legend-dirt" /><span>Грунтовка / гравий</span></div>
               <div><i className="legend-path" /><span>Пешеходная тропа</span></div>
+              <div><i className="legend-fishing">🐟</i><span>Место для рыбалки</span></div>
               <div><i className="legend-note">⚑</i><span>Личная заметка</span></div>
               <small>Текущее место:<br /><b>{locationName}</b></small>
               <p className="map-selection">{selectedMapObject ?? "Нажмите объект для подробностей. ПКМ — поставить точку маршрута."}</p>
