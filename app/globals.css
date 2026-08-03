@@ -4069,6 +4069,30 @@ kbd {
 .freight-hud span { font-size: 13px; }
 .freight-hud small { color: #bdcec5; }
 
+.freight-navigation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(242, 198, 111, 0.3);
+}
+
+.freight-navigation > i {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: #f2c66f;
+  font-style: normal;
+  transform-origin: center;
+}
+
+.freight-navigation > span { display: grid; line-height: 1.1; }
+.freight-navigation strong { font-size: 14px; }
+.freight-navigation small { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trunk-context-hint { border-color: rgba(205, 234, 92, 0.55); }
+
 .freight-context-hint {
   position: fixed;
   z-index: 35;

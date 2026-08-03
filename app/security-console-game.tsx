@@ -2332,6 +2332,7 @@ export default function SecurityConsoleGame() {
   const [usingFreightTrolley, setUsingFreightTrolley] = useState(false);
   const usingFreightTrolleyRef = useRef(false);
   const [freightContextHint, setFreightContextHint] = useState("");
+  const [nearTrunk, setNearTrunk] = useState(false);
   const [freightServiceStatus, setFreightServiceStatus] = useState("");
   const freightInteractionRef = useRef<() => boolean>(() => false);
   const [rentalActive, setRentalActive] = useState(false);
@@ -2613,6 +2614,10 @@ export default function SecurityConsoleGame() {
 
   useEffect(() => {
     modeRef.current = mode;
+    const engine = engineRef.current;
+    engine.keys.clear();
+    engine.fastWalkUntil = 0;
+    engine.carSteer = 0;
   }, [mode]);
 
   const restoreOnFootCamera = useCallback((player: THREE.Group) => {
@@ -4503,11 +4508,18 @@ export default function SecurityConsoleGame() {
     let nextViolationCheck = 0;
     let wrongLaneSeconds = 0;
 
+    const isPlayerNearTrunk = () => {
+      if (engine.driving || !currentVehicleRef.current || !car.visible || !player.visible) return false;
+      const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(car.quaternion);
+      const trunkPoint = car.position.clone().addScaledVector(forward, -2.75);
+      return player.position.distanceTo(trunkPoint) < 3.2;
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       const editingText = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
       if (editingText && e.code !== "Escape") return;
       const action = actionForCode(e.code);
-      if (action) engine.keys.add(action);
+      if (action && modeRef.current === "world") engine.keys.add(action);
       if (action && engine.driving && autopilotRef.current && !e.repeat) {
         autopilotRef.current = false;
         setAutopilot(false);
@@ -4546,7 +4558,7 @@ export default function SecurityConsoleGame() {
         setMode("inventory");
         return;
       }
-      if (e.code === "KeyG" && modeRef.current === "world" && !engine.driving && currentVehicleRef.current && engine.car?.visible && engine.player && engine.player.position.distanceTo(engine.car.position) < 6.5) {
+      if (e.code === "KeyG" && modeRef.current === "world" && isPlayerNearTrunk()) {
         engine.keys.clear();
         setTrunkOpen(true);
         setMode("inventory");
@@ -4838,7 +4850,12 @@ export default function SecurityConsoleGame() {
       }
     };
 
-    const clearInput = () => engine.keys.clear();
+    const clearInput = () => {
+      engine.keys.clear();
+      engine.fastWalkUntil = 0;
+      engine.carSteer = 0;
+      mouseDown = false;
+    };
     const onKeyUp = (e: KeyboardEvent) => {
       const action = actionForCode(e.code);
       if (action) engine.keys.delete(action);
@@ -4888,6 +4905,7 @@ export default function SecurityConsoleGame() {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", clearInput);
+    window.addEventListener("pagehide", clearInput);
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
@@ -5736,6 +5754,7 @@ export default function SecurityConsoleGame() {
           }
         }
         setFreightContextHint(nextFreightHint);
+        setNearTrunk(isPlayerNearTrunk());
         setPlayerPos({ x: focus.position.x, z: focus.position.z });
         setCarPos({ x: car.position.x, z: car.position.z });
         setMovementState(currentMovement);
@@ -5827,6 +5846,7 @@ export default function SecurityConsoleGame() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", clearInput);
+      window.removeEventListener("pagehide", clearInput);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
@@ -6735,7 +6755,7 @@ export default function SecurityConsoleGame() {
     cameraViewRef.current = "third";
     setCameraView("third");
     setMode("taxiRide");
-    setTaxiStatus("Вы сидите на заднем сиденье. Такси следует по правой полосе.");
+    setTaxiStatus("Поездка началась.");
   };
   taxiBoardRef.current = acceptTaxiRide;
 
@@ -6836,7 +6856,10 @@ export default function SecurityConsoleGame() {
         ...engine.traffic.map((vehicle) => ({ mesh: vehicle.mesh, direction: vehicle.direction })),
       ];
       const vehicleAhead = vehicles
-        .filter((vehicle) => vehicle.direction !== -direction && objectInLane(vehicle.mesh, rightLaneZ, 3.6, stoppingDistance))
+        // Detect any physical vehicle occupying our lane. This is important on
+        // the return trip from Dinskaya: a bus that is turning or dwelling may
+        // still report the opposite route direction but must be overtaken.
+        .filter((vehicle) => objectInLane(vehicle.mesh, rightLaneZ, 3.6, stoppingDistance))
         .sort((a, b) => forwardDistanceTo(a.mesh) - forwardDistanceTo(b.mesh))[0];
       const oncomingLaneClear = !vehicles.some((vehicle) =>
         vehicle.direction === -direction &&
@@ -7520,6 +7543,16 @@ export default function SecurityConsoleGame() {
   }, [gameTime]);
   const mapCenterX = playerPos.x;
   const waypointDistance = mapWaypoint ? Math.hypot(mapWaypoint.x - playerPos.x, mapWaypoint.z - playerPos.z) : null;
+  const activeFreightNavigation = freightJobs.find((job) => job.status === "active");
+  const freightNavigationTarget = activeFreightNavigation
+    ? activeFreightNavigation.loaded ? activeFreightNavigation.delivery : activeFreightNavigation.pickup
+    : null;
+  const freightNavigationDistance = freightNavigationTarget
+    ? Math.hypot(freightNavigationTarget.x - playerPos.x, freightNavigationTarget.z - playerPos.z)
+    : null;
+  const freightNavigationAngle = freightNavigationTarget
+    ? Math.atan2(playerPos.z - freightNavigationTarget.z, freightNavigationTarget.x - playerPos.x) - engineRef.current.yaw
+    : 0;
   const mapRouteStyle = useMemo(() => {
     if (!mapWaypoint) return undefined;
     const startX = worldMapXPct(playerPos.x);
@@ -7635,9 +7668,11 @@ export default function SecurityConsoleGame() {
               <b>▦ {job.title}</b>
               <span>{job.loaded ? `Разгружено: ${job.deliveredUnits}/${job.units}` : `В кузове: ${job.loadedUnits}/${job.units} · тележка: ${trolleyCargoUnits}/5`}</span>
               <small>{carriedFreight ? `В руках: ${carriedFreight.label} · ${carriedFreight.weight} кг` : job.loaded ? `Доставить: ${job.delivery.label}` : `Загрузить: ${job.pickup.label}`}</small>
+              {freightNavigationTarget && freightNavigationDistance !== null && <div className="freight-navigation"><i style={{ transform: `rotate(${freightNavigationAngle + Math.PI / 2}rad)` }}>▲</i><span><strong>{formatDistance(freightNavigationDistance)}</strong><small>{freightNavigationTarget.label}</small></span></div>}
             </div>;
           })()}
           {freightContextHint && <div className="freight-context-hint"><kbd>E</kbd><span>{freightContextHint.replace(/^E · /, "")}</span></div>}
+          {nearTrunk && !freightContextHint && <div className="freight-context-hint trunk-context-hint"><kbd>G</kbd><span>Открыть багажник</span></div>}
           {trafficIncident && <div className="traffic-incident"><b>{trafficIncident.title}</b><span>{trafficIncident.detail}</span><strong>{trafficIncident.fine > 0 ? `−${trafficIncident.fine.toLocaleString("ru-RU")} ₽` : "Без штрафа"}</strong></div>}
           <div className="daily-hud">
             {dailyChallenges.activeChallenges.filter((challenge) => challenge.tracked && !challenge.claimed).slice(0, 2).map((challenge) => {
