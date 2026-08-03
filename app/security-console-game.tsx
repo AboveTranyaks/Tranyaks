@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "inventory" | "pause" | "tariff" | "office" | "station" | "transit" | "busRide" | "fishing";
+type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "inventory" | "pause" | "tariff" | "office" | "station" | "transit" | "busRide" | "taxiRide" | "fishing";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
@@ -270,6 +270,8 @@ type SaveData = {
   fishingLine?: FishingLineId;
   fishCaught?: number;
   pendingVehiclePickup?: VehicleId | null;
+  hunger?: number;
+  thirst?: number;
 };
 
 type SaveEnvelope = {
@@ -578,6 +580,10 @@ const HOUSE_RESIDENT_NAMES = ["Анна", "Илья", "Нина", "Сергей"
 const HOUSE_RESIDENT_ARCHETYPES = ["Дружелюбный", "Скептик", "Занятой", "Осторожный", "Экономный", "Практичный"];
 const HOUSE_RESIDENT_NEEDS = ["безопасность семьи", "защита гаража", "спокойствие за дом", "защита автомобиля", "датчики дыма", "система без ложных тревог"];
 const HOUSE_RESIDENT_COLORS = [0x6e8fa0, 0xc78678, 0x738c67, 0xa0789a, 0xb99561, 0x667b96];
+const RESIDENT_ACTIVITIES = ["у калитки", "на лавочке", "в палисаднике", "у гаража", "на крыльце"] as const;
+const RESIDENT_CARS = ["белая Лада Гранта", "синяя Нива", "серебристый УАЗ Пикап", "красная Ока", "чёрная Toyota Camry", "автомобиля нет"] as const;
+const residentActivity = (id: number) => RESIDENT_ACTIVITIES[id % RESIDENT_ACTIVITIES.length];
+const residentCar = (id: number) => RESIDENT_CARS[(id * 3) % RESIDENT_CARS.length];
 
 function createNeighbourhoodResidentSeeds(): Omit<Resident, "interest" | "signed">[] {
   const centres = [0, 1350, 2700, 4000];
@@ -828,6 +834,12 @@ const WORLD_KEY_POINTS = [
   { id: "dinskaya", label: "Центр станицы Динской", short: "Д", x: 4000, z: -24, kind: "village" },
 ] as const;
 
+const SATELLITE_VILLAGES = [
+  { id: "berezovka", name: "Берёзовка", x: 620, z: 1260 },
+  { id: "lesnaya", name: "Лесная", x: 620, z: -1260 },
+  { id: "ozernaya", name: "Озёрная", x: 3380, z: 1260 },
+] as const;
+
 const BUS_STOPS: BusStopSpec[] = [
   { id: "pervorechenskoe", name: "село Первореченское", x: 125, z: -18 },
   { id: "highway", name: "Трасса · промежуточная", x: 2000, z: -18 },
@@ -931,7 +943,7 @@ const OUTFIT_BY_ID = Object.fromEntries(OUTFITS.map((outfit) => [outfit.id, outf
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const mapPos = (value: number, extent: number) => `${50 + (value / extent) * 44}%`;
 const worldMapXPct = (x: number) => clamp(((x + 180) / 4360) * 100, 2, 98);
-const worldMapZPct = (z: number) => clamp(50 - (z / 390) * 72, 8, 92);
+const worldMapZPct = (z: number) => clamp(50 - (z / 4000) * 84, 8, 92);
 const worldMapX = (x: number) => `${worldMapXPct(x)}%`;
 const worldMapZ = (z: number) => `${worldMapZPct(z)}%`;
 const formatDistance = (distance: number) => distance < 1000 ? `${Math.round(distance)} м` : `${(distance / 1000).toFixed(1)} км`;
@@ -1129,6 +1141,8 @@ const DEFAULT_SAVE: SaveData = {
   fishingLine: undefined,
   fishCaught: 0,
   pendingVehiclePickup: null,
+  hunger: 100,
+  thirst: 100,
 };
 
 function checksum(data: SaveData) {
@@ -1211,6 +1225,8 @@ function migrateSave(value: Partial<SaveData> | null | undefined): SaveData {
     fishingLine: value?.fishingLine === "nylon" || value?.fishingLine === "braid" || value?.fishingLine === "fluorocarbon" ? value.fishingLine : undefined,
     fishCaught: Math.max(0, value?.fishCaught ?? 0),
     pendingVehiclePickup: value?.pendingVehiclePickup && VEHICLE_BY_ID[value.pendingVehiclePickup] ? value.pendingVehiclePickup : null,
+    hunger: clamp(value?.hunger ?? 100, 0, 100),
+    thirst: clamp(value?.thirst ?? 100, 0, 100),
     carFuel: value?.carFuel === undefined ? (ownedVehicles.length > 0 ? 20 : 0) : clamp(value.carFuel > FUEL_TANK_LITERS ? value.carFuel / 100 * FUEL_TANK_LITERS : value.carFuel, 0, FUEL_TANK_LITERS),
   };
 }
@@ -2156,6 +2172,15 @@ export default function SecurityConsoleGame() {
   const cameraViewRef = useRef<"third" | "first">("third");
   const [speedLimiter, setSpeedLimiter] = useState(false);
   const speedLimiterRef = useRef(false);
+  const [autopilot, setAutopilot] = useState(false);
+  const autopilotRef = useRef(false);
+  const [hunger, setHunger] = useState(initialSave.hunger ?? 100);
+  const hungerRef = useRef(initialSave.hunger ?? 100);
+  const [thirst, setThirst] = useState(initialSave.thirst ?? 100);
+  const thirstRef = useRef(initialSave.thirst ?? 100);
+  const hospitalCooldownRef = useRef(false);
+  const pauseReturnModeRef = useRef<GameMode>("world");
+  const phoneReturnModeRef = useRef<GameMode>("world");
   const [nearCar, setNearCar] = useState(false);
   const [trunkOpen, setTrunkOpen] = useState(false);
   const [nearest, setNearest] = useState<Resident | null>(null);
@@ -2317,6 +2342,7 @@ export default function SecurityConsoleGame() {
   const [minimapRotates, setMinimapRotates] = useState(true);
   const [selectedMapObject, setSelectedMapObject] = useState<string | null>(null);
   const [mapWaypoint, setMapWaypoint] = useState<{ x: number; z: number; label: string } | null>(null);
+  const mapWaypointRef = useRef<{ x: number; z: number; label: string } | null>(null);
   const [phoneApp, setPhoneApp] = useState<PhoneApp>("home");
   const [phoneTheme, setPhoneTheme] = useState<PhoneTheme>(initialSave.phoneTheme ?? "dark");
   const phoneThemeRef = useRef(phoneTheme);
@@ -2329,6 +2355,8 @@ export default function SecurityConsoleGame() {
   const [phoneNoteDraft, setPhoneNoteDraft] = useState("");
   const [uiScale, setUiScale] = useState(clamp(initialSave.uiScale ?? 1, 0.8, 1.5));
   const uiScaleRef = useRef(uiScale);
+  const [brightness, setBrightness] = useState(100);
+  const [pauseSection, setPauseSection] = useState<"main" | "graphics" | "sound" | "controls" | "interface">("main");
   const [audioMix, setAudioMix] = useState<AudioMix>(initialSave.audioMix ?? DEFAULT_AUDIO_MIX);
   const audioMixRef = useRef(audioMix);
   const audioEngineRef = useRef<ProceduralAudioEngine | null>(null);
@@ -2345,6 +2373,7 @@ export default function SecurityConsoleGame() {
   const [taxiTier, setTaxiTier] = useState<"economy" | "comfort" | "van">("economy");
   const [taxiDestination, setTaxiDestination] = useState<"pervorechenskoe" | "highway" | "dinskaya">("dinskaya");
   const [taxiStatus, setTaxiStatus] = useState("Выберите тариф и пункт назначения.");
+  const [taxiRide, setTaxiRide] = useState<{ stage: "arriving" | "offered" | "riding" | "done"; start: { x: number; z: number }; destination: { label: string; x: number; z: number }; price: number; progress: number } | null>(null);
   const [radioStation, setRadioStation] = useState("Lo‑Fi Beats");
   const [radioPlaying, setRadioPlaying] = useState(false);
   const [radioMode, setRadioMode] = useState<"local" | "stream">("local");
@@ -2374,6 +2403,10 @@ export default function SecurityConsoleGame() {
     trolleyCargoUnitsRef.current = trolleyCargoUnits;
     usingFreightTrolleyRef.current = usingFreightTrolley;
   }, [carriedFreight, trolleyCargoUnits, usingFreightTrolley]);
+
+  useEffect(() => {
+    mapWaypointRef.current = mapWaypoint;
+  }, [mapWaypoint]);
 
   const signedCount = residents.filter((r) => r.signed).length;
   const selectedRecordStation = RADIO_RECORD_STATIONS.find((station) => station[1] === recordStationUrl) ?? RADIO_RECORD_STATIONS[0];
@@ -2486,6 +2519,8 @@ export default function SecurityConsoleGame() {
         fishingLine: fishingLineRef.current ?? undefined,
         fishCaught: fishCaughtRef.current,
         pendingVehiclePickup: pendingVehiclePickupRef.current,
+        hunger: hungerRef.current,
+        thirst: thirstRef.current,
       };
       const envelope = writeEnvelope(slot, saveName, save);
       setSaveSlots((current) => ({ ...current, [slot]: envelope }));
@@ -3186,7 +3221,7 @@ export default function SecurityConsoleGame() {
     engine.wildlife = [];
     engine.benches = [];
 
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 420), mat(0x78ad5d));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4400, 4000), mat(0x78ad5d));
     ground.rotation.x = -Math.PI / 2;
     ground.position.x = 1950;
     ground.receiveShadow = true;
@@ -3354,6 +3389,24 @@ export default function SecurityConsoleGame() {
       makeTree(scene, x, -27, 0.72);
       makeTree(scene, x + 48, 29, 0.8);
     }
+
+    // Three small villages in the outer corners expand the playable footprint
+    // to roughly 4×4 km and are connected to the highway by dirt roads.
+    SATELLITE_VILLAGES.forEach((village, villageIndex) => {
+      const connectorLength = Math.abs(village.z) - 165;
+      box(scene, [9, 0.12, connectorLength], [village.x, 0.12, Math.sign(village.z) * (165 + connectorLength / 2)], 0x9f9175);
+      for (let index = 0; index < 10; index++) {
+        const row = index < 5 ? -1 : 1;
+        const houseX = village.x - 64 + (index % 5) * 32;
+        const houseZ = village.z + row * 24;
+        makeHouse(scene, houseX, houseZ, [0xdab77e, 0xc98f76, 0x8fae94][(index + villageIndex) % 3], false);
+        engine.colliders.push({ x: houseX, z: houseZ, halfX: 5.4, halfZ: 4.9, kind: "house" });
+        box(scene, [2, 0.1, 18], [houseX, 0.2, village.z + row * 13], 0xb7a889);
+      }
+      for (let treeIndex = 0; treeIndex < 30; treeIndex++) {
+        makeTree(scene, village.x - 105 + (treeIndex * 29) % 210, village.z - 82 + (treeIndex * 47) % 164, 0.65 + (treeIndex % 4) * 0.08);
+      }
+    });
 
     const addHousePath = (x: number, z: number) => {
       const district = nearestDistrictAt(x);
@@ -3707,6 +3760,15 @@ export default function SecurityConsoleGame() {
     );
     sign.position.set(92, 6.2, -11.08);
     scene.add(sign);
+    const officeParkingCenters = [92, 1350, 2700];
+    officeParkingCenters.forEach((parkingX) => {
+      box(scene, [24, 0.08, 10], [parkingX, 0.1, -36], 0x646b68);
+      for (const stripeX of [-9, -3, 3, 9]) box(scene, [0.16, 0.03, 8], [parkingX + stripeX, 0.16, -36], 0xf2ead4);
+      const parkingLabel = makeReadableTextSign(makeTextBoard("ПАРКОВКА ЧОП", 520, 100, "#f3f0dc", "#315c45"), 6, 1.1);
+      parkingLabel.position.set(parkingX, 1.25, -41);
+      parkingLabel.userData.tag = "OfficeParking";
+      scene.add(parkingLabel);
+    });
     engine.colliders.push(
       { x: 3, z: -22, halfX: 8, halfZ: 5.5, kind: "landmark" },
       { x: -72, z: 34, halfX: 12, halfZ: 6.5, kind: "landmark" },
@@ -3970,8 +4032,23 @@ export default function SecurityConsoleGame() {
 
     residentsRef.current.forEach((resident) => {
       const npc = makePerson(resident.color);
-      npc.position.set(resident.x + 5, 0, resident.z + (resident.z > 0 ? -5 : 5));
+      const activityIndex = resident.id % RESIDENT_ACTIVITIES.length;
+      const side = resident.z > 0 ? -1 : 1;
+      const offsets = [[5, 5], [-3.8, 5.8], [2.5, 7], [5.8, 1.8], [0, 5.2]] as const;
+      npc.position.set(resident.x + offsets[activityIndex][0], 0, resident.z + side * offsets[activityIndex][1]);
       npc.rotation.y = resident.z > 0 ? Math.PI : 0;
+      npc.userData.activity = residentActivity(resident.id);
+      if (activityIndex === 1) {
+        npc.position.y = 0.55;
+        for (const name of ["leftLeg", "rightLeg"]) { const leg = npc.getObjectByName(name); if (leg) leg.rotation.x = -1.1; }
+      } else if (activityIndex === 2) {
+        for (const name of ["leftArm", "rightArm"]) { const arm = npc.getObjectByName(name); if (arm) arm.rotation.x = -0.75; }
+        const tool = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 2.4, 5), mat(0x72543b));
+        tool.position.set(0.65, 1.7, 0.45); tool.rotation.z = -0.32; npc.add(tool);
+      } else if (activityIndex === 3) {
+        const tool = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.18), mat(0x59646a));
+        tool.position.set(0.7, 2.15, 0.7); npc.add(tool);
+      }
       const marker = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.55, 0),
         mat(resident.signed ? 0xcce86b : 0xf28c55),
@@ -4215,6 +4292,11 @@ export default function SecurityConsoleGame() {
       if (editingText && e.code !== "Escape") return;
       const action = actionForCode(e.code);
       if (action) engine.keys.add(action);
+      if (action && engine.driving && autopilotRef.current && !e.repeat) {
+        autopilotRef.current = false;
+        setAutopilot(false);
+        flash("Автопилот отключён ручным управлением");
+      }
       if (e.code === "Tab" || e.code === "Space") e.preventDefault();
       if (e.code === "KeyW" && !e.repeat) {
         const tapNow = performance.now();
@@ -4260,25 +4342,33 @@ export default function SecurityConsoleGame() {
         setMode("world");
         return;
       }
-      if (e.code === "KeyO" && (modeRef.current === "world" || modeRef.current === "phone")) {
+      if (e.code === "KeyO" && (modeRef.current === "world" || modeRef.current === "taxiRide" || modeRef.current === "phone")) {
         engine.keys.clear();
         setPhoneApp("home");
-        setMode(modeRef.current === "phone" ? "world" : "phone");
+        if (modeRef.current === "phone") setMode(phoneReturnModeRef.current);
+        else { phoneReturnModeRef.current = modeRef.current; setMode("phone"); }
         return;
       }
       if (e.code === "Escape" && modeRef.current === "phone") {
         engine.keys.clear();
-        setMode("world");
+        setMode(phoneReturnModeRef.current);
         return;
       }
       if (e.code === "Escape" && modeRef.current === "world") {
         engine.keys.clear();
+        pauseReturnModeRef.current = "world";
+        setMode("pause");
+        return;
+      }
+      if (e.code === "Escape" && (modeRef.current === "busRide" || modeRef.current === "taxiRide")) {
+        engine.keys.clear();
+        pauseReturnModeRef.current = modeRef.current;
         setMode("pause");
         return;
       }
       if (e.code === "Escape" && modeRef.current === "pause") {
         engine.keys.clear();
-        setMode("world");
+        setMode(pauseReturnModeRef.current);
         return;
       }
       if (e.code === "Escape" && modeRef.current === "dialogue") {
@@ -4335,6 +4425,29 @@ export default function SecurityConsoleGame() {
         speedLimiterRef.current = !speedLimiterRef.current;
         setSpeedLimiter(speedLimiterRef.current);
         flash(speedLimiterRef.current ? "Ограничитель скорости включён" : "Ограничитель скорости выключен");
+        return;
+      }
+      if (e.code === "Digit4" && engine.driving && !e.repeat) {
+        if (!mapWaypointRef.current) return flash("Сначала поставьте метку на карте Tab");
+        autopilotRef.current = !autopilotRef.current;
+        setAutopilot(autopilotRef.current);
+        engine.keys.clear();
+        flash(autopilotRef.current ? `Автопилот ведёт к точке «${mapWaypointRef.current.label}»` : "Автопилот отключён");
+        return;
+      }
+      if (e.code === "KeyU" && modeRef.current === "world" && !e.repeat) {
+        const snack = inventoryRef.current.find((stack) => stack.id === "snack" && stack.amount > 0);
+        const coffee = inventoryRef.current.find((stack) => stack.id === "coffee" && stack.amount > 0);
+        if (!snack && !coffee) return flash("В рюкзаке нет еды или напитка");
+        const id: InventoryItemId = hungerRef.current <= thirstRef.current && snack ? "snack" : coffee ? "coffee" : "snack";
+        const stack = inventoryRef.current.find((item) => item.id === id)!;
+        const next = stack.amount === 1 ? inventoryRef.current.filter((item) => item.id !== id) : inventoryRef.current.map((item) => item.id === id ? { ...item, amount: item.amount - 1 } : item);
+        inventoryRef.current = next;
+        setInventory(next);
+        if (id === "snack") { hungerRef.current = clamp(hungerRef.current + 35, 0, 100); setHunger(hungerRef.current); }
+        else { thirstRef.current = clamp(thirstRef.current + 30, 0, 100); setThirst(thirstRef.current); }
+        flash(id === "snack" ? "Алексей перекусил · голод +35" : "Алексей выпил кофе · жажда +30");
+        persistRef.current();
         return;
       }
       if (e.code === "KeyE" && modeRef.current === "busRide" && busStopChoiceRef.current && !e.repeat) {
@@ -4507,13 +4620,17 @@ export default function SecurityConsoleGame() {
       if (!mouseDown) return;
       engine.cameraInputAt = performance.now();
       engine.yaw -= (e.clientX - lastMouseX) * 0.006;
-      engine.pitch = clamp(engine.pitch + (e.clientY - lastMouseY) * 0.004, 0.18, 1.02);
+      engine.pitch = clamp(engine.pitch + (e.clientY - lastMouseY) * 0.004, -0.52, 1.4);
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
     };
     const onMouseUp = () => (mouseDown = false);
     const onWheel = (e: WheelEvent) => {
       const ridingBus = modeRef.current === "busRide";
+      if (cameraViewRef.current === "first" && (engine.driving || ridingBus)) {
+        cameraViewRef.current = "third";
+        setCameraView("third");
+      }
       engine.zoom = clamp(engine.zoom + e.deltaY * 0.01, ridingBus ? 3.6 : 8, ridingBus ? 14.3 : engine.driving ? 24 : 19);
     };
     const onContextMenu = (e: Event) => e.preventDefault();
@@ -4615,8 +4732,26 @@ export default function SecurityConsoleGame() {
 
       if (canMove && engine.driving) {
         const activeVehicle = currentVehicleRef.current ? VEHICLE_BY_ID[currentVehicleRef.current] : VEHICLE_BY_ID.oka;
-        const throttle = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
-        const steerInput = (engine.keys.has("left") ? 1 : 0) - (engine.keys.has("right") ? 1 : 0);
+        let throttle = (engine.keys.has("forward") ? 1 : 0) - (engine.keys.has("backward") ? 1 : 0);
+        let steerInput = (engine.keys.has("left") ? 1 : 0) - (engine.keys.has("right") ? 1 : 0);
+        if (autopilotRef.current && mapWaypointRef.current) {
+          const target = mapWaypointRef.current;
+          const distanceToTarget = Math.hypot(target.x - car.position.x, target.z - car.position.z);
+          if (distanceToTarget < 8) {
+            autopilotRef.current = false;
+            setAutopilot(false);
+            engine.carSpeed = 0;
+            throttle = 0;
+            steerInput = 0;
+            flash(`Автопилот прибыл: ${target.label}`);
+          } else {
+            const desiredAngle = Math.atan2(target.x - car.position.x, target.z - car.position.z);
+            const angleDelta = Math.atan2(Math.sin(desiredAngle - car.rotation.y), Math.cos(desiredAngle - car.rotation.y));
+            steerInput = clamp(angleDelta * 1.7, -1, 1);
+            throttle = Math.abs(angleDelta) > 0.85 ? 0.35 : 1;
+            if (!speedLimiterRef.current) { speedLimiterRef.current = true; setSpeedLimiter(true); }
+          }
+        }
         const handbrake = engine.keys.has("brake");
         const surface = surfaceAt(car.position.x, car.position.z);
         engine.surface = surface;
@@ -4665,7 +4800,7 @@ export default function SecurityConsoleGame() {
         const candidateZ = car.position.z + (carDirection.z * engine.carSpeed + carSide.z * engine.carSlip) * dt;
         if (!isBlocked(candidateX, candidateZ, 2.25, false)) {
           car.position.x = clamp(candidateX, -180, 4180);
-          car.position.z = clamp(candidateZ, -195, 195);
+          car.position.z = clamp(candidateZ, -1950, 1950);
           const travelled = Math.abs(engine.carSpeed) * dt;
           engine.odometer += travelled / 1000;
           statisticsRef.current.kmDriven += travelled / 1000;
@@ -4776,7 +4911,7 @@ export default function SecurityConsoleGame() {
           const dx = ((-Math.sin(angle) * forward + Math.cos(angle) * side) / length) * speed * dt;
           const dz = ((-Math.cos(angle) * forward - Math.sin(angle) * side) / length) * speed * dt;
           const nextX = clamp(player.position.x + dx, -180, 4180);
-          const nextZ = clamp(player.position.z + dz, -195, 195);
+          const nextZ = clamp(player.position.z + dz, -1950, 1950);
           if (!isBlocked(nextX, player.position.z, 0.62, true)) player.position.x = nextX;
           if (!isBlocked(player.position.x, nextZ, 0.62, true)) player.position.z = nextZ;
           statisticsRef.current.kmWalked += Math.hypot(dx, dz) / 1000;
@@ -4840,6 +4975,23 @@ export default function SecurityConsoleGame() {
         engine.time += dt * (isDay ? 15 / 7200 : 9 / 900);
       }
       if (engine.time >= 24) engine.time -= 24;
+      const advancedHours = worldClockActive ? (engine.time >= previousGameTime ? engine.time - previousGameTime : 24 - previousGameTime + engine.time) : 0;
+      if (advancedHours > 0) {
+        hungerRef.current = clamp(hungerRef.current - advancedHours, 0, 100);
+        thirstRef.current = clamp(thirstRef.current - advancedHours * 1.15, 0, 100);
+        if (hungerRef.current < 20 || thirstRef.current < 20) energyRef.current = clamp(energyRef.current - advancedHours * 1.8, 0, 100);
+        if ((hungerRef.current <= 0 || thirstRef.current <= 0) && !hospitalCooldownRef.current) {
+          hospitalCooldownRef.current = true;
+          moneyRef.current -= 10000;
+          setMoney(moneyRef.current);
+          hungerRef.current = 50;
+          thirstRef.current = 50;
+          energyRef.current = 50;
+          player.position.set(4015, 0, -42);
+          flash("Алексей потерял сознание · больница восстановила силы · счёт 10 000 ₽");
+          window.setTimeout(() => { hospitalCooldownRef.current = false; persistRef.current(); }, 3000);
+        }
+      }
       if (previousGameTime < 8 && engine.time >= 8) persistRef.current();
       previousGameTime = engine.time;
       if (modeRef.current !== "intro" && modeRef.current !== "pause") statisticsRef.current.playTimeSeconds += dt;
@@ -5153,7 +5305,7 @@ export default function SecurityConsoleGame() {
         });
       });
       const busOperating = (engine.time >= 6 && engine.time < 23) || onBusRef.current;
-      const busClockActive = modeRef.current === "world" || modeRef.current === "busRide";
+      const busClockActive = modeRef.current === "world" || modeRef.current === "busRide" || (modeRef.current === "pause" && onBusRef.current);
       const busGameTimeDelta = busClockActive ? (engine.time - lastBusGameTime + 24) % 24 : 0;
       lastBusGameTime = engine.time;
       bus.visible = busOperating;
@@ -5301,6 +5453,8 @@ export default function SecurityConsoleGame() {
       if (uiTick > 0.12) {
         uiTick = 0;
         setEnergy(Math.round(energyRef.current));
+        setHunger(Math.round(hungerRef.current));
+        setThirst(Math.round(thirstRef.current));
         setGameTime(engine.time);
         setNearest(engine.nearest);
         setNearestWalker(engine.nearestWalker);
@@ -6272,19 +6426,63 @@ export default function SecurityConsoleGame() {
       setTaxiStatus(`Недостаточно средств: поездка стоит ${price.toLocaleString("ru-RU")} ₽.`);
       return;
     }
-    const nextMoney = money - price;
-    setMoney(nextMoney);
-    setTaxiStatus(`${tier.label}: машина подана. Поездка до ${destination.label}…`);
+    const start = { x: playerPos.x, z: playerPos.z };
+    setTaxiStatus(`${tier.label}: водитель подъезжает. Ожидание ${tier.wait}`);
+    setTaxiRide({ stage: "arriving", start, destination, price, progress: 0 });
+    setMode("taxiRide");
     window.setTimeout(() => {
-      const player = engineRef.current.player;
-      if (player) player.position.set(destination.x, 0, destination.z);
-      setPlayerPos({ x: destination.x, z: destination.z });
-      setTaxiStatus(`Поездка завершена · оплачено ${price.toLocaleString("ru-RU")} ₽.`);
-      persist(residentsRef.current, nextMoney, reputation);
-      setMode("world");
-      flash(`Такси доставило вас: ${destination.label} · −${price.toLocaleString("ru-RU")} ₽`);
-    }, 2600);
+      setTaxiRide((ride) => ride ? { ...ride, stage: "offered" } : null);
+      setTaxiStatus(`Водитель: «До ${destination.label} — ${price.toLocaleString("ru-RU")} ₽. Поехали?»`);
+    }, 1800);
   };
+
+  const acceptTaxiRide = () => {
+    if (!taxiRide || moneyRef.current < taxiRide.price) return;
+    engineRef.current.player && (engineRef.current.player.visible = false);
+    setTaxiRide({ ...taxiRide, stage: "riding", progress: 0 });
+    setTaxiStatus("Вы сидите на заднем сиденье. Такси следует по правой полосе.");
+  };
+
+  const cancelTaxiRide = () => {
+    if (engineRef.current.player) engineRef.current.player.visible = true;
+    setTaxiStatus("Заказ отменён, оплата не списана.");
+    setTaxiRide(null);
+    setMode("world");
+    flash("Таксист уехал · заказ отменён");
+  };
+
+  useEffect(() => {
+    if (!taxiRide || taxiRide.stage !== "riding") return;
+    const distance = Math.hypot(taxiRide.destination.x - taxiRide.start.x, taxiRide.destination.z - taxiRide.start.z);
+    const durationMs = clamp(distance / 120 * 1000, 9000, 30000);
+    const startedAt = performance.now() - taxiRide.progress * durationMs;
+    const timer = window.setInterval(() => {
+      const progress = clamp((performance.now() - startedAt) / durationMs, 0, 1);
+      const smooth = progress * progress * (3 - 2 * progress);
+      const x = THREE.MathUtils.lerp(taxiRide.start.x, taxiRide.destination.x, smooth);
+      const directZ = THREE.MathUtils.lerp(taxiRide.start.z, taxiRide.destination.z, smooth);
+      const roadBlend = Math.sin(progress * Math.PI);
+      const travelRightLane = taxiRide.destination.x >= taxiRide.start.x ? 3.5 : -3.5;
+      const z = THREE.MathUtils.lerp(directZ, travelRightLane, roadBlend * 0.92);
+      const player = engineRef.current.player;
+      if (player) player.position.set(x, 0, z);
+      setPlayerPos({ x, z });
+      setTaxiRide((ride) => ride ? { ...ride, progress } : null);
+      if (progress >= 1) {
+        window.clearInterval(timer);
+        moneyRef.current -= taxiRide.price;
+        setMoney(moneyRef.current);
+        if (player) { player.position.set(taxiRide.destination.x, 0, taxiRide.destination.z); player.visible = true; }
+        setPlayerPos({ x: taxiRide.destination.x, z: taxiRide.destination.z });
+        setTaxiStatus(`Поездка завершена · оплачено ${taxiRide.price.toLocaleString("ru-RU")} ₽.`);
+        setTaxiRide(null);
+        setMode("world");
+        flash(`Такси доставило вас: ${taxiRide.destination.label} · −${taxiRide.price.toLocaleString("ru-RU")} ₽`);
+        persistRef.current();
+      }
+    }, 80);
+    return () => window.clearInterval(timer);
+  }, [taxiRide?.stage]);
 
   const capturePhonePhoto = () => {
     const canvas = engineRef.current.renderer?.domElement;
@@ -6916,7 +7114,7 @@ export default function SecurityConsoleGame() {
     const bounds = event.currentTarget.getBoundingClientRect();
     const xRatio = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
     const zRatio = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
-    const waypoint = { x: xRatio * 4360 - 180, z: ((50 - zRatio * 100) / 72) * 390, label: "Пользовательская точка" };
+    const waypoint = { x: xRatio * 4360 - 180, z: ((50 - zRatio * 100) / 84) * 4000, label: "Пользовательская точка" };
     setMapWaypoint(waypoint);
     setSelectedMapObject("Маршрут построен. ПКМ по карте перенесёт точку.");
   };
@@ -6945,7 +7143,7 @@ export default function SecurityConsoleGame() {
       onPointerDownCapture={() => ensureAudio()}
       aria-label="Игра Пульт охраны"
     >
-      <div className="world-viewport" ref={mountRef} aria-label="Трёхмерный посёлок" />
+      <div className="world-viewport" ref={mountRef} aria-label="Трёхмерный посёлок" style={{ filter: `brightness(${brightness}%)` }} />
       {(weather === "Дождь" || weather === "Гроза") && (
         <div className={`weather-screen ${weather === "Гроза" ? "storm" : "rain"}`} aria-hidden="true" />
       )}
@@ -6972,6 +7170,7 @@ export default function SecurityConsoleGame() {
             <div className="energy-label"><span>Энергия героя</span><b>{energy}%</b></div>
             <div className="energy-track"><div className="energy-fill" style={{ width: `${energy}%` }} /></div>
             <small>{driving ? "За рулём" : `${movementState}${playerSpeedKmh > 0 ? ` · ${playerSpeedKmh.toFixed(1)} км/ч` : ""} · ${walkSurface}`}{energy < 20 ? " · усталость" : ""}</small>
+            <div className="needs-row"><span className={hunger < 20 ? "critical" : ""}>🍽 {hunger}%</span><span className={thirst < 20 ? "critical" : ""}>💧 {thirst}%</span><small>U · использовать еду/напиток</small></div>
           </div>
           {driving && (
             <div className="vehicle-card">
@@ -6985,7 +7184,7 @@ export default function SecurityConsoleGame() {
           )}
           <div className="controls-hint">
             {driving ? (
-              <><kbd>WASD</kbd> вести <kbd>Space</kbd> ручник <kbd>C</kbd> {cameraView === "first" ? "вид снаружи" : "вид из салона"} <kbd>K</kbd> лимит {speedLimiter ? "вкл." : "выкл."} <kbd>E</kbd> выйти</>
+              <><kbd>WASD</kbd> вести <kbd>C</kbd> {cameraView === "first" ? "вид снаружи" : "вид из салона"} <kbd>K</kbd> лимит {speedLimiter ? "вкл." : "выкл."} <kbd>4</kbd> {autopilot ? "автопилот вкл." : "автопилот"} <kbd>E</kbd> выйти</>
             ) : (
               <><kbd>WASD</kbd> двигаться <kbd>Shift</kbd> бег <kbd>I</kbd> инвентарь <kbd>Tab</kbd> карта <kbd>P</kbd> планшет <kbd>O</kbd> телефон</>
             )}
@@ -7097,7 +7296,7 @@ export default function SecurityConsoleGame() {
       )}
 
       {mode === "phone" && (
-        <section className="phone-layer" onClick={() => setMode("world")} aria-label="Игровой смартфон">
+        <section className="phone-layer" onClick={() => setMode(phoneReturnModeRef.current)} aria-label="Игровой смартфон">
           <div className={`phone-frame theme-${phoneTheme} wallpaper-${phoneWallpaper}`} onClick={(event) => event.stopPropagation()}>
             <div className="phone-speaker" />
             <header className="phone-status">
@@ -7107,7 +7306,7 @@ export default function SecurityConsoleGame() {
             <div className="phone-titlebar">
               {phoneApp !== "home" ? <button onClick={() => setPhoneApp("home")}>‹</button> : <span />}
               <div><small>Смартфон Алексея</small><b>{phoneApp === "home" ? "Главный экран" : phoneApp === "taxi" ? "Такси" : phoneApp === "freight" ? "Грузоперевозки" : phoneApp === "contacts" ? "Контакты" : phoneApp === "notifications" ? "Уведомления" : phoneApp === "camera" ? "Камера" : phoneApp === "radio" ? "Радио и музыка" : phoneApp === "notes" ? "Заметки" : "Настройки"}</b></div>
-              <button onClick={() => setMode("world")}>×</button>
+              <button onClick={() => setMode(phoneReturnModeRef.current)}>×</button>
             </div>
             <div className="phone-screen">
               {phoneApp === "home" && (
@@ -7122,7 +7321,6 @@ export default function SecurityConsoleGame() {
                       ["camera", "📷", "Камера"],
                       ["radio", "♫", "Радио"],
                       ["notes", "▤", "Заметки"],
-                      ["settings", "⚙", "Настройки"],
                     ] as [PhoneApp, string, string][]).map(([app, icon, label]) => (
                       <button key={app} onClick={() => setPhoneApp(app)}><i>{icon}</i><span>{label}</span></button>
                     ))}
@@ -7417,6 +7615,17 @@ export default function SecurityConsoleGame() {
         </section>
       )}
 
+      {mode === "taxiRide" && taxiRide && (
+        <section className="taxi-ride-panel">
+          <small>🚕 {taxiTier === "comfort" ? "Комфорт" : taxiTier === "van" ? "Микроавтобус" : "Эконом"} · пассажир сзади</small>
+          <b>{taxiRide.stage === "arriving" ? "Такси подъезжает" : taxiRide.stage === "offered" ? "Водитель ожидает решения" : `В пути: ${taxiRide.destination.label}`}</b>
+          <span>{taxiStatus}</span>
+          {taxiRide.stage === "riding" && <div className="taxi-trip-progress"><i style={{ width: `${taxiRide.progress * 100}%` }} /><span>{Math.round(taxiRide.progress * 100)}%</span></div>}
+          {taxiRide.stage === "offered" && <div><button className="primary" onClick={acceptTaxiRide}>Поехали · {taxiRide.price.toLocaleString("ru-RU")} ₽</button><button onClick={cancelTaxiRide}>Отмена</button></div>}
+          {taxiRide.stage === "riding" && <small>ПКМ · осмотреться　O · телефон　Esc · меню</small>}
+        </section>
+      )}
+
       {mode === "intro" && (
         <section className="overlay intro">
           <div className="intro-copy">
@@ -7487,7 +7696,7 @@ export default function SecurityConsoleGame() {
           <div className="dialogue-panel">
             <div className="dialogue-head">
               <div className="portrait">●</div>
-              <div className="dialogue-name"><strong>{activeNpc.name}</strong><span>{activeNpc.archetype} · {activeNpc.address}</span></div>
+              <div className="dialogue-name"><strong>{activeNpc.name}</strong><span>{activeNpc.archetype} · {activeNpc.address} · {residentActivity(activeNpc.id)} · {residentCar(activeNpc.id)}</span></div>
               <div className="interest">
                 <div className="interest-top"><span>Заинтересованность</span><b>{activeNpc.interest}%</b></div>
                 <div className="interest-track"><div className="interest-fill" style={{ width: `${activeNpc.interest}%` }} /></div>
@@ -7728,7 +7937,7 @@ export default function SecurityConsoleGame() {
                   {residents.map((r) => (
                     <div key={r.id} className="client-card">
                       <span className="client-avatar">●</span>
-                      <div><strong>{r.name}</strong><small>{r.address} · интерес {r.interest}%</small></div>
+                      <div><strong>{r.name}</strong><small>{r.address} · интерес {r.interest}% · {residentActivity(r.id)} · {residentCar(r.id)}</small></div>
                       <span className={`client-state ${r.signed ? "signed" : ""}`}>{r.signed ? "Охраняется" : "Лид"}</span>
                     </div>
                   ))}
@@ -7933,6 +8142,7 @@ export default function SecurityConsoleGame() {
               <div className="world-map-road gravel" /><div className="world-map-road footpath" />
               <div className="world-map-cross first" /><div className="world-map-cross second" /><div className="world-map-river" />
               {DISTRICTS.map((district) => <div key={district.id} className="world-village" style={{ left: worldMapX(district.x), top: district.id === "industrial" ? "58%" : "34%" }}><b>{district.id === "central" ? "село Первореченское" : district.subtitle}</b><small>{openedBranches.includes(district.id) ? "филиал открыт" : `нужно ★ ${district.reputation}`}</small></div>)}
+              {SATELLITE_VILLAGES.map((village) => <div key={village.id} className="world-village satellite" style={{ left: worldMapX(village.x), top: worldMapZ(village.z) }}><b>{village.name}</b><small>10 домов · грунтовая дорога</small></div>)}
               {mapLayers.clients && residents.map((resident) => (
                 <button
                   key={`map-house-${resident.id}`}
@@ -7981,7 +8191,14 @@ export default function SecurityConsoleGame() {
 
       {mode === "pause" && (
         <section className="overlay pause-overlay">
-          <div className="pause-card"><small>Игра приостановлена</small><h1>Пульт охраны</h1><button className="primary-btn" onClick={() => setMode("world")}>Продолжить</button>{officeRented && totalContracts > 0 && <button className="soft-btn" onClick={() => startOffice()}>Дежурство · играть за пульт</button>}<button className="soft-btn" onClick={() => { setTabletTab("quests"); setMode("tablet"); }}>Журнал заданий</button><button className="soft-btn" onClick={() => setMinimapRotates((value) => !value)}>Миникарта: {minimapRotates ? "вращается за героем" : "север сверху"}</button><button className="soft-btn" onClick={() => { setTabletTab("saves"); setMode("tablet"); }}>Сохранения</button><button className="soft-btn" onClick={() => manualSave("slot1")}>Быстро сохранить в слот 1</button><button className="soft-btn" onClick={FullResetAndRestart}>Начать заново</button></div>
+          <div className="pause-card expanded"><small>Игра приостановлена</small><h1>Пульт охраны</h1>
+            <nav className="pause-tabs"><button onClick={() => setPauseSection("main")}>Главное</button><button onClick={() => setPauseSection("graphics")}>Графика</button><button onClick={() => setPauseSection("sound")}>Звук</button><button onClick={() => setPauseSection("controls")}>Управление</button><button onClick={() => setPauseSection("interface")}>Интерфейс</button></nav>
+            {pauseSection === "main" && <div className="pause-settings-grid"><button className="primary-btn" onClick={() => setMode(pauseReturnModeRef.current)}>Продолжить</button>{officeRented && totalContracts > 0 && <button className="soft-btn" onClick={() => startOffice()}>Дежурство · играть за пульт</button>}<button className="soft-btn" onClick={() => { setTabletTab("quests"); setMode("tablet"); }}>Журнал заданий</button><button className="soft-btn" onClick={() => { setTabletTab("saves"); setMode("tablet"); }}>Сохранения и загрузка</button><button className="soft-btn" onClick={() => manualSave("slot1")}>Быстро сохранить в слот 1</button><button className="soft-btn" onClick={FullResetAndRestart}>Начать заново</button></div>}
+            {pauseSection === "graphics" && <div className="pause-settings"><label>Яркость <b>{brightness}%</b><input type="range" min="70" max="130" value={brightness} onChange={(event) => setBrightness(Number(event.target.value))} /></label><p>Тени от солнца: включены<br />Облака и погода: включены<br />Low-poly LOD: автоматически</p></div>}
+            {pauseSection === "sound" && <div className="pause-settings">{(["master","music","radio","ambient","sfx","alerts","voice"] as (keyof AudioMix)[]).map((channel) => <label key={channel}>{channel === "master" ? "Общая" : channel === "music" ? "Музыка" : channel === "radio" ? "Радио" : channel === "ambient" ? "Окружение" : channel === "sfx" ? "Эффекты" : channel === "alerts" ? "Тревоги" : "Голос"} <b>{audioMix[channel]}%</b><input type="range" min={channel === "alerts" ? 30 : 0} max="100" value={audioMix[channel]} onChange={(event) => updateAudioChannel(channel, Number(event.target.value))} /></label>)}</div>}
+            {pauseSection === "controls" && <div className="pause-settings"><p><b>Пешком:</b> WASD · Shift · E<br /><b>Автомобиль:</b> WASD · Space · C · K · 4<br /><b>Интерфейсы:</b> Tab · P · I · O · Esc</p><label><input type="checkbox" checked={speedLimiter} onChange={() => { speedLimiterRef.current = !speedLimiterRef.current; setSpeedLimiter(speedLimiterRef.current); }} /> Контроль скорости 60/90 км/ч</label><label><input type="checkbox" checked={false} readOnly /> Автовозврат камеры за авто (выключен)</label><small>Камера сохраняет выбранный угол. Вертикальный обзор: −30°…+80°.</small></div>}
+            {pauseSection === "interface" && <div className="pause-settings"><label>Масштаб интерфейса <b>{uiScale.toFixed(1)}×</b><input type="range" min="0.8" max="1.5" step="0.1" value={uiScale} onChange={(event) => { const value = Number(event.target.value); uiScaleRef.current = value; setUiScale(value); }} /></label><button className="soft-btn" onClick={() => setMinimapRotates((value) => !value)}>Миникарта: {minimapRotates ? "вращается за героем" : "север сверху"}</button></div>}
+          </div>
         </section>
       )}
 

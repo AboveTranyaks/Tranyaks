@@ -493,3 +493,28 @@ test("adds fishing progression, three mapped waters, and dealership vehicle pick
   assert.match(styles, /\.fishing-overlay/);
   assert.match(styles, /\.tension-meter/);
 });
+
+test("adds autopilot, physical taxi trips, hero needs, pause settings, and outer villages", async () => {
+  const [source, styles] = await Promise.all([readFile(sourceUrl, "utf8"), readFile(stylesUrl, "utf8")]);
+
+  assert.match(source, /e\.code === "Digit4" && engine\.driving/);
+  assert.match(source, /Автопилот ведёт к точке/);
+  assert.match(source, /desiredAngle = Math\.atan2/);
+  assert.match(source, /type GameMode = .*"taxiRide"/);
+  assert.match(source, /stage: "arriving" \| "offered" \| "riding"/);
+  assert.match(source, /Вы сидите на заднем сиденье/);
+  assert.doesNotMatch(source, /setTimeout\(\(\) => \{\s*const player = engineRef\.current\.player;\s*if \(player\) player\.position\.set\(destination\.x/);
+  assert.match(source, /hunger: clamp/);
+  assert.match(source, /thirst: clamp/);
+  assert.match(source, /e\.code === "KeyU"/);
+  assert.match(source, /счёт 10 000 ₽/);
+  assert.match(source, /pauseSection.*"graphics".*"sound".*"controls".*"interface"/);
+  assert.match(source, /const SATELLITE_VILLAGES = \[/);
+  assert.match(source, /new THREE\.PlaneGeometry\(4400, 4000\)/);
+  assert.match(source, /OfficeParking/);
+  assert.match(source, /residentActivity/);
+  assert.match(source, /residentCar/);
+  assert.match(styles, /\.taxi-ride-panel/);
+  assert.match(styles, /\.pause-tabs/);
+  assert.match(styles, /\.needs-row/);
+});
