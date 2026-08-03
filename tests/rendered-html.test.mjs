@@ -502,6 +502,14 @@ test("adds autopilot, physical taxi trips, hero needs, pause settings, and outer
   assert.match(source, /desiredAngle = Math\.atan2/);
   assert.match(source, /type GameMode = .*"taxiRide"/);
   assert.match(source, /stage: "arriving" \| "offered" \| "riding"/);
+  assert.match(source, /const taxi = makeCar\(0xe6b83f, true\)/);
+  assert.match(source, /taxi\.name = "physicalTaxi"/);
+  assert.match(source, /engine\.taxi = taxi/);
+  assert.match(source, /pendingTaxi\?\.stage === "offered"/);
+  assert.match(source, /taxiBoardRef\.current\(\)/);
+  assert.match(source, /const focus = ridingBus \? bus : ridingTaxi \? taxi/);
+  assert.match(source, /taxi\.position\.set\(x, 0, z\)/);
+  assert.match(source, /Подойдите к машине и нажмите E/);
   assert.match(source, /Вы сидите на заднем сиденье/);
   assert.doesNotMatch(source, /setTimeout\(\(\) => \{\s*const player = engineRef\.current\.player;\s*if \(player\) player\.position\.set\(destination\.x/);
   assert.match(source, /hunger: clamp/);
