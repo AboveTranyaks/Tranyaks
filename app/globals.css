@@ -4272,3 +4272,17 @@ kbd {
   .inventory-stats { display: grid; }
   .freight-hud { display: none; }
 }
+
+/* Compact passenger card: it leaves the road and control hints visible. */
+.taxi-ride-panel.compact {
+  width: min(390px, calc(100vw - 24px));
+  bottom: 16px;
+  gap: 5px;
+  padding: 10px 14px;
+  border-radius: 13px;
+}
+
+.taxi-ride-panel.compact > b { font-size: 16px; }
+.taxi-ride-panel.compact > small { font-size: 11px; }
+.taxi-ride-panel.compact .taxi-trip-progress { height: 12px; }
+.taxi-ride-panel.compact .taxi-trip-progress span { font-size: 10px; line-height: 12px; }

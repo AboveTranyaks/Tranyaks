@@ -305,6 +305,7 @@ type Walker = {
   personalReputation: number;
   stationary?: boolean;
   workSchedule?: "day" | "night";
+  activationRadius?: number;
 };
 
 type TrafficVehicle = {
@@ -842,6 +843,7 @@ const WORLD_KEY_POINTS = [
   { id: "bus-dinskaya", label: "Остановка «Динская»", short: "А", x: 3875, z: -18, kind: "transit" },
   { id: "river", label: "Река Кочеты", short: "Р", x: 0, z: 180, kind: "nature" },
   { id: "dinskaya", label: "Центр станицы Динской", short: "Д", x: 4000, z: -24, kind: "village" },
+  { id: "dinskaya-lenina", label: "Жилой квартал · ул. Ленина", short: "5Э", x: 4000, z: -220, kind: "village" },
 ] as const;
 
 const SATELLITE_VILLAGES = [
@@ -3877,6 +3879,105 @@ export default function SecurityConsoleGame() {
       engine.colliders.push({ x, z, halfX: width / 2 + 0.5, halfZ: depth / 2 + 0.5, kind: "landmark" });
     };
 
+    const addFiveStoreyBuilding = (
+      x: number,
+      z: number,
+      wallColor: number,
+      accentColor: number,
+      label: string,
+    ) => {
+      const width = 34;
+      const depth = 14;
+      const height = 19;
+      const streetZ = -220;
+      const front = z > streetZ ? -1 : 1;
+      const facadeZ = z + front * (depth / 2 + 0.08);
+      box(scene, [width, height, depth], [x, height / 2, z], wallColor);
+      box(scene, [width + 0.8, 0.65, depth + 0.8], [x, height + 0.32, z], 0x626965);
+      box(scene, [2.6, 3.1, 0.34], [x - 9, 1.58, facadeZ], 0x5c473a);
+      box(scene, [2.6, 3.1, 0.34], [x + 9, 1.58, facadeZ], 0x5c473a);
+      box(scene, [4.4, 0.3, 1.7], [x - 9, 3.28, z + front * 7.7], accentColor);
+      box(scene, [4.4, 0.3, 1.7], [x + 9, 3.28, z + front * 7.7], accentColor);
+
+      for (let floor = 0; floor < 5; floor++) {
+        const windowY = 2.4 + floor * 3.45;
+        for (const windowX of [-13.3, -9, -4.5, 0, 4.5, 9, 13.3]) {
+          const windowMaterial = new THREE.MeshStandardMaterial({
+            color: 0x9bcbd3,
+            emissive: 0xffd78a,
+            emissiveIntensity: 0.04,
+            roughness: 0.34,
+          });
+          const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(1.55, 1.55, 0.2), windowMaterial);
+          windowMesh.name = "window";
+          windowMesh.position.set(x + windowX, windowY, facadeZ);
+          scene.add(windowMesh);
+          windowMaterials.push(windowMaterial);
+          if (floor > 0 && Math.abs(windowX) < 11 && Math.round(windowX) % 2 !== 0) {
+            box(scene, [3.2, 0.22, 1.15], [x + windowX, windowY - 1.08, z + front * 7.65], accentColor);
+            box(scene, [3.2, 1.05, 0.12], [x + windowX, windowY - 0.55, z + front * 8.18], 0x6d7774);
+          }
+        }
+      }
+
+      const antennaMast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.2, 6), mat(0x4d5754));
+      antennaMast.position.set(x + 10, height + 2.25, z);
+      const antennaBar = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.09, 0.09), mat(0x4d5754));
+      antennaBar.position.set(x + 10, height + 3.8, z);
+      scene.add(antennaMast, antennaBar);
+
+      const buildingLabel = makeReadableTextSign(
+        makeTextBoard(label, 640, 92, "#edf0e7", "#355348"),
+        8.6,
+        1.15,
+      );
+      buildingLabel.position.set(x, 4.55, z + front * 7.18);
+      if (front > 0) buildingLabel.rotation.y = Math.PI;
+      scene.add(buildingLabel);
+      engine.colliders.push({ x, z, halfX: width / 2 + 0.4, halfZ: depth / 2 + 0.4, kind: "landmark" });
+    };
+
+    // A clearly visible urban quarter turns Dinskaya into a small town. Eight
+    // five-storey blocks line Lenin Street, with courtyards, parking and a
+    // pedestrian connection to the old centre.
+    box(scene, [330, 0.14, 12], [4000, 0.09, -220], 0x6e7470);
+    box(scene, [12, 0.14, 150], [4000, 0.09, -145], 0x6e7470);
+    for (const sidewalkZ of [-211.5, -228.5]) box(scene, [330, 0.2, 4], [4000, 0.23, sidewalkZ], 0xb8b6ad);
+    for (const sidewalkX of [3991.5, 4008.5]) box(scene, [4, 0.2, 150], [sidewalkX, 0.23, -145], 0xb8b6ad);
+    for (let stripe = -14; stripe <= 14; stripe += 7) box(scene, [3.4, 0.025, 0.34], [4000 + stripe, 0.19, -220], 0xe7e4d9);
+
+    const apartmentPalette = [0xd5c49f, 0xb9c6b2, 0xc8aca5, 0xd0b486, 0xaebfc7, 0xc4b7d0, 0xd3c5ad, 0xb7c8a5];
+    const apartmentAccents = [0x8f6555, 0x617d70, 0x8d6e65, 0x8c7651];
+    [3870, 3955, 4045, 4130].forEach((buildingX, column) => {
+      addFiveStoreyBuilding(buildingX, -190, apartmentPalette[column], apartmentAccents[column], column % 2 ? "АПТЕКА" : "ПРОДУКТЫ");
+      addFiveStoreyBuilding(buildingX, -250, apartmentPalette[column + 4], apartmentAccents[(column + 2) % 4], column % 2 ? "ПАРИКМАХЕРСКАЯ" : "ДОМ БЫТА");
+      for (const parkingZ of [-205, -235]) {
+        box(scene, [28, 0.08, 6], [buildingX, 0.14, parkingZ], 0x7b807c);
+        for (const parkingX of [-10, -5, 0, 5, 10]) box(scene, [0.12, 0.03, 5], [buildingX + parkingX, 0.2, parkingZ], 0xe8e5da);
+      }
+    });
+
+    // Courtyard furniture and a playground between the blocks.
+    for (const courtyardX of [3912, 4000, 4088]) {
+      addStreetBench(courtyardX - 4, -274, 0);
+      addStreetBench(courtyardX + 4, -274, 0);
+      box(scene, [14, 0.12, 10], [courtyardX, 0.16, -282], 0xcbb982);
+      box(scene, [0.35, 3.4, 0.35], [courtyardX - 3.2, 1.75, -282], 0x4f745d);
+      box(scene, [0.35, 3.4, 0.35], [courtyardX + 3.2, 1.75, -282], 0x4f745d);
+      box(scene, [7, 0.28, 0.28], [courtyardX, 3.35, -282], 0xe39a4e);
+      box(scene, [3.8, 0.22, 1.2], [courtyardX, 1.0, -281.3], 0xd66f59, -0.2);
+      makeTree(scene, courtyardX - 8, -282, 0.62);
+      makeTree(scene, courtyardX + 8, -282, 0.68);
+    }
+
+    const leninStreetSign = makeReadableTextSign(
+      makeTextBoard("УЛИЦА ЛЕНИНА · ЖИЛОЙ КВАРТАЛ", 900, 110, "#eff1e8", "#31564a"),
+      15,
+      1.6,
+    );
+    leninStreetSign.position.set(4000, 4.4, -213.2);
+    scene.add(leninStreetSign);
+
     // Dinskaya services and public spaces: clinic, cafe, market, fire station
     // and a landscaped playground make the settlement feel inhabited.
     addDinskayaBuilding(4058, 44, 17, 11, 0xe5ddd0, 0x7392a0);
@@ -4189,6 +4290,35 @@ export default function SecurityConsoleGame() {
       }
     }
     console.info("[NPCSpawner] Станица Динская: создано 30 уличных NPC");
+
+    // Apartment residents are pooled by visibility: together with the private
+    // sector Dinskaya has more than 150 inhabitants, while only people within
+    // 150 metres of the player are rendered and animated.
+    const urbanResidentCount = 96;
+    const urbanNames = ["Анна", "Дмитрий", "Елена", "Максим", "Софья", "Николай", "Ирина", "Павел", "Валентина", "Артём", "Марина", "Сергей"];
+    for (let index = 0; index < urbanResidentCount; index++) {
+      const direction = (index % 2 === 0 ? 1 : -1) as 1 | -1;
+      const laneZ = index % 4 < 2 ? -211.5 : -228.5;
+      const urbanResident = makePerson(walkerColors[index % walkerColors.length]);
+      urbanResident.scale.setScalar(0.54);
+      urbanResident.position.set(3845 + ((index * 37) % 310), 0, laneZ);
+      urbanResident.rotation.y = direction > 0 ? Math.PI / 2 : -Math.PI / 2;
+      urbanResident.visible = false;
+      scene.add(urbanResident);
+      engine.walkers.push({
+        id: 400 + index,
+        name: `${urbanNames[index % urbanNames.length]} · дом ${1 + (index % 8)}`,
+        mesh: urbanResident,
+        minX: 3840,
+        maxX: 4160,
+        laneZ,
+        direction,
+        speed: 0.58 + (index % 5) * 0.09,
+        personalReputation: initialSave.streetReputation?.[400 + index] ?? 0,
+        activationRadius: 150,
+      });
+    }
+    console.info(`[NPCPool] Жилой квартал Динской: ${urbanResidentCount} жителей, радиус активации 150 м`);
 
     const wildlifeSeeds: { kind: WildlifeKind; x: number; z: number; count: number; radius: number; color: number; flying?: boolean }[] = [
       { kind: "cat", x: -55, z: 58, count: 4, radius: 42, color: 0xb57b4f },
@@ -5190,9 +5320,12 @@ export default function SecurityConsoleGame() {
         if (marker) marker.position.y = 5.7 + Math.sin(now * 0.003 + i) * 0.18;
       });
       engine.walkers.forEach((walker, i) => {
+        let walkerVisible = true;
         if (walker.workSchedule) {
-          walker.mesh.visible = walker.workSchedule === "day" ? constructionActive : !constructionActive;
+          walkerVisible = walker.workSchedule === "day" ? constructionActive : !constructionActive;
         }
+        if (walker.activationRadius) walkerVisible = walkerVisible && walker.mesh.position.distanceTo(player.position) <= walker.activationRadius;
+        walker.mesh.visible = walkerVisible;
         if (!walker.mesh.visible) return;
         const talking = modeRef.current === "street" && activeStreetWalkerIdRef.current === walker.id;
         if (talking) {
@@ -6748,11 +6881,12 @@ export default function SecurityConsoleGame() {
       if (now - lastUiUpdateAt >= 120 || progress >= 1) {
         lastUiUpdateAt = now;
         setPlayerPos({ x, z });
-        setTaxiRide((ride) => {
-          const nextRide = ride ? { ...ride, progress } : null;
-          taxiRideRef.current = nextRide;
-          return nextRide;
-        });
+        // Keep the mutable passenger state authoritative. A React updater may
+        // run after disembarking and otherwise resurrect the stale "riding"
+        // state, making the world camera attach itself to the taxi again.
+        const nextRide: TaxiRideState = { ...taxiRide, progress };
+        taxiRideRef.current = nextRide;
+        setTaxiRide(nextRide);
       }
       if (progress >= 1) {
         moneyRef.current -= taxiRide.price;
@@ -6765,12 +6899,10 @@ export default function SecurityConsoleGame() {
           restoreOnFootCamera(player);
         }
         setTaxiStatus(`Поездка завершена · оплачено ${taxiRide.price.toLocaleString("ru-RU")} ₽.`);
+        taxi.visible = false;
         setTaxiRide(null);
         flash(`Такси доставило вас: ${taxiRide.destination.label} · −${taxiRide.price.toLocaleString("ru-RU")} ₽`);
         persistRef.current();
-        window.setTimeout(() => {
-          if (!taxiRideRef.current && engineRef.current.taxi) engineRef.current.taxi.visible = false;
-        }, 3000);
         return;
       }
       animationFrame = window.requestAnimationFrame(animateRide);
@@ -7952,10 +8084,10 @@ export default function SecurityConsoleGame() {
       )}
 
       {taxiRide && (mode === "world" || mode === "taxiRide") && (
-        <section className="taxi-ride-panel">
+        <section className={`taxi-ride-panel ${taxiRide.stage === "riding" ? "compact" : ""}`}>
           <small>🚕 {taxiTier === "comfort" ? "Комфорт" : taxiTier === "van" ? "Микроавтобус" : "Эконом"} · пассажир сзади</small>
           <b>{taxiRide.stage === "arriving" ? "Такси едет к вам" : taxiRide.stage === "offered" ? "Такси подъехало" : `В пути: ${taxiRide.destination.label}`}</b>
-          <span>{taxiStatus}</span>
+          {taxiRide.stage !== "riding" && <span>{taxiStatus}</span>}
           {taxiRide.stage === "riding" && <div className="taxi-trip-progress"><i style={{ width: `${taxiRide.progress * 100}%` }} /><span>{Math.round(taxiRide.progress * 100)}%</span></div>}
           {taxiRide.stage === "arriving" && <div><button onClick={cancelTaxiRide}>Отменить заказ</button></div>}
           {taxiRide.stage === "offered" && <div><strong>Подойдите к машине и нажмите E</strong><button onClick={cancelTaxiRide}>Отмена</button></div>}
