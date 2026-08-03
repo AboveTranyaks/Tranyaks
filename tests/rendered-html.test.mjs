@@ -513,7 +513,7 @@ test("adds autopilot, physical taxi trips, hero needs, pause settings, and outer
   assert.match(source, /requestAnimationFrame\(animateRide\)/);
   assert.match(source, /now - lastUiUpdateAt >= 120/);
   assert.match(source, /Подойдите к машине и нажмите E/);
-  assert.match(source, /Вы сидите на заднем сиденье/);
+  assert.doesNotMatch(source, /Вы сидите на заднем сиденье/);
   assert.doesNotMatch(source, /setTimeout\(\(\) => \{\s*const player = engineRef\.current\.player;\s*if \(player\) player\.position\.set\(destination\.x/);
   assert.match(source, /hunger: clamp/);
   assert.match(source, /thirst: clamp/);
@@ -588,4 +588,29 @@ test("builds a visible five-storey residential quarter in Dinskaya", async () =>
   assert.match(source, /const urbanResidentCount = 96/);
   assert.match(source, /activationRadius: 150/);
   assert.match(source, /Жилой квартал · ул\. Ленина/);
+});
+
+test("resets movement input, exposes the trunk, and guides freight jobs", async () => {
+  const [source, styles] = await Promise.all([readFile(sourceUrl, "utf8"), readFile(stylesUrl, "utf8")]);
+
+  assert.match(source, /if \(action && modeRef\.current === "world"\) engine\.keys\.add\(action\)/);
+  assert.match(source, /engine\.fastWalkUntil = 0/);
+  assert.match(source, /window\.addEventListener\("pagehide", clearInput\)/);
+  assert.match(source, /const isPlayerNearTrunk = \(\) =>/);
+  assert.match(source, /addScaledVector\(forward, -2\.75\)/);
+  assert.match(source, /<kbd>G<\/kbd><span>Открыть багажник<\/span>/);
+  assert.match(source, /const freightNavigationDistance/);
+  assert.match(source, /className="freight-navigation"/);
+  assert.match(styles, /\.freight-navigation/);
+});
+
+test("drives taxi trips from Dinskaya back to Pervorechenskoye", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /pervorechenskoe: \{ label: "село Первореченское", x: 80, z: 8 \}/);
+  assert.match(source, /const direction: 1 \| -1 = taxiRide\.destination\.x >= taxiRide\.start\.x \? 1 : -1/);
+  assert.match(source, /THREE\.MathUtils\.lerp\(taxiRide\.start\.x, taxiRide\.destination\.x, progress\)/);
+  assert.match(source, /\.filter\(\(vehicle\) => objectInLane\(vehicle\.mesh, rightLaneZ/);
+  assert.doesNotMatch(source, /vehicle\.direction !== -direction && objectInLane/);
+  assert.match(source, /setTaxiStatus\("Поездка началась\."\)/);
 });
