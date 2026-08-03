@@ -2086,6 +2086,7 @@ export default function SecurityConsoleGame() {
   const engineRef = useRef<{
     player?: THREE.Group;
     car?: THREE.Group;
+    taxi?: THREE.Group;
     freightTrolley?: THREE.Group;
     freightTrolleyCargo?: THREE.Mesh[];
     freightVehicleCargo?: THREE.Mesh[];
@@ -2182,6 +2183,7 @@ export default function SecurityConsoleGame() {
   const pauseReturnModeRef = useRef<GameMode>("world");
   const phoneReturnModeRef = useRef<GameMode>("world");
   const [nearCar, setNearCar] = useState(false);
+  const [nearTaxi, setNearTaxi] = useState(false);
   const [trunkOpen, setTrunkOpen] = useState(false);
   const [nearest, setNearest] = useState<Resident | null>(null);
   const [nearestWalker, setNearestWalker] = useState<Walker | null>(null);
@@ -2373,7 +2375,10 @@ export default function SecurityConsoleGame() {
   const [taxiTier, setTaxiTier] = useState<"economy" | "comfort" | "van">("economy");
   const [taxiDestination, setTaxiDestination] = useState<"pervorechenskoe" | "highway" | "dinskaya">("dinskaya");
   const [taxiStatus, setTaxiStatus] = useState("Выберите тариф и пункт назначения.");
-  const [taxiRide, setTaxiRide] = useState<{ stage: "arriving" | "offered" | "riding" | "done"; start: { x: number; z: number }; destination: { label: string; x: number; z: number }; price: number; progress: number } | null>(null);
+  type TaxiRideState = { stage: "arriving" | "offered" | "riding"; start: { x: number; z: number }; destination: { label: string; x: number; z: number }; price: number; progress: number };
+  const [taxiRide, setTaxiRide] = useState<TaxiRideState | null>(null);
+  const taxiRideRef = useRef<TaxiRideState | null>(null);
+  const taxiBoardRef = useRef<() => void>(() => undefined);
   const [radioStation, setRadioStation] = useState("Lo‑Fi Beats");
   const [radioPlaying, setRadioPlaying] = useState(false);
   const [radioMode, setRadioMode] = useState<"local" | "stream">("local");
@@ -3939,6 +3944,18 @@ export default function SecurityConsoleGame() {
     car.visible = currentVehicleRef.current !== null;
     scene.add(car);
     engine.car = car;
+
+    // Taxi is a real world vehicle. It stays outside the scene until an order is placed,
+    // then approaches the player, carries them and remains visible during disembarking.
+    const taxi = makeCar(0xe6b83f, true);
+    taxi.name = "physicalTaxi";
+    taxi.visible = false;
+    const taxiRoofSign = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.34, 0.52), mat(0xf5d657));
+    taxiRoofSign.name = "taxiRoofSign";
+    taxiRoofSign.position.set(0, 3.02, 0);
+    taxi.add(taxiRoofSign);
+    scene.add(taxi);
+    engine.taxi = taxi;
     engine.time = initialSave.gameTime ?? 8.25;
     engine.fuel = initialSave.carFuel ?? 0;
     engine.wear = initialSave.carWear ?? 0;
@@ -4414,7 +4431,7 @@ export default function SecurityConsoleGame() {
         flash("Остановка запрошена · автобус остановится на ближайшем павильоне");
         return;
       }
-      if (e.code === "KeyC" && (engine.driving || modeRef.current === "busRide") && !e.repeat) {
+      if (e.code === "KeyC" && (engine.driving || modeRef.current === "busRide" || taxiRideRef.current?.stage === "riding") && !e.repeat) {
         const next = cameraViewRef.current === "third" ? "first" : "third";
         cameraViewRef.current = next;
         setCameraView(next);
@@ -4457,6 +4474,18 @@ export default function SecurityConsoleGame() {
       if (e.code === "KeyE" && modeRef.current === "world" && !e.repeat) {
         const focus = engine.driving ? engine.car : engine.player;
         if (!focus) return;
+        const pendingTaxi = taxiRideRef.current;
+        if (
+          !engine.driving &&
+          pendingTaxi?.stage === "offered" &&
+          engine.taxi?.visible &&
+          engine.player &&
+          engine.player.position.distanceTo(engine.taxi.position) < 7
+        ) {
+          engine.keys.clear();
+          taxiBoardRef.current();
+          return;
+        }
         if (!engine.driving && freightInteractionRef.current()) return;
         const closestFishingSpot = FISHING_SPOTS.reduce((closest, spot) =>
           Math.hypot(focus.position.x - spot.x, focus.position.z - spot.z) < Math.hypot(focus.position.x - closest.x, focus.position.z - closest.z) ? spot : closest,
@@ -4627,11 +4656,12 @@ export default function SecurityConsoleGame() {
     const onMouseUp = () => (mouseDown = false);
     const onWheel = (e: WheelEvent) => {
       const ridingBus = modeRef.current === "busRide";
-      if (cameraViewRef.current === "first" && (engine.driving || ridingBus)) {
+      const ridingTaxi = taxiRideRef.current?.stage === "riding";
+      if (cameraViewRef.current === "first" && (engine.driving || ridingBus || ridingTaxi)) {
         cameraViewRef.current = "third";
         setCameraView("third");
       }
-      engine.zoom = clamp(engine.zoom + e.deltaY * 0.01, ridingBus ? 3.6 : 8, ridingBus ? 14.3 : engine.driving ? 24 : 19);
+      engine.zoom = clamp(engine.zoom + e.deltaY * 0.01, ridingBus ? 3.6 : 8, ridingBus ? 14.3 : engine.driving || ridingTaxi ? 24 : 19);
     };
     const onContextMenu = (e: Event) => e.preventDefault();
     const onResize = () => {
@@ -4668,6 +4698,7 @@ export default function SecurityConsoleGame() {
       if (engine.busPassengers.some((passenger) => passenger.mesh.visible && passenger.state !== "riding" && Math.hypot(x - passenger.mesh.position.x, z - passenger.mesh.position.z) < radius + 0.72)) return "pedestrian";
       if (engine.traffic.some((vehicle) => Math.hypot(x - vehicle.mesh.position.x, z - vehicle.mesh.position.z) < radius + 2.2)) return "vehicle";
       if (bus.visible && Math.hypot(x - bus.position.x, z - bus.position.z) < radius + 4.2) return "bus";
+      if (taxi.visible && Math.hypot(x - taxi.position.x, z - taxi.position.z) < radius + 2.25) return "vehicle";
       return "object";
     };
 
@@ -4695,6 +4726,7 @@ export default function SecurityConsoleGame() {
         }
       }
       if (bus.visible && Math.hypot(x - bus.position.x, z - bus.position.z) < radius + 4.2) return true;
+      if (taxi.visible && Math.hypot(x - taxi.position.x, z - taxi.position.z) < radius + 2.25) return true;
       if (includeCar && car.visible && Math.hypot(x - car.position.x, z - car.position.z) < radius + 2.25) return true;
       return false;
     };
@@ -4706,7 +4738,8 @@ export default function SecurityConsoleGame() {
       last = now;
       const canMove = modeRef.current === "world" || modeRef.current === "phone";
       const ridingBus = onBusRef.current;
-      const focus = ridingBus ? bus : engine.driving ? car : player;
+      const ridingTaxi = taxiRideRef.current?.stage === "riding" && taxi.visible;
+      const focus = ridingBus ? bus : ridingTaxi ? taxi : engine.driving ? car : player;
       let currentMovement: MovementState = "Покой";
       let currentWalkSpeedKmh = 0;
       let currentWalkSurface: WalkSurfaceKind = pedestrianSurfaceAt(player.position.x, player.position.z).surface;
@@ -5430,15 +5463,15 @@ export default function SecurityConsoleGame() {
       }
 
       const target = focus.position.clone();
-      target.y += ridingBus ? 2.35 : engine.driving ? 2.2 : 3.0;
-      if (cameraViewRef.current === "first" && (ridingBus || engine.driving)) {
+      target.y += ridingBus ? 2.35 : ridingTaxi ? 1.9 : engine.driving ? 2.2 : 3.0;
+      if (cameraViewRef.current === "first" && (ridingBus || ridingTaxi || engine.driving)) {
         const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(focus.quaternion);
-        const seatOffset = new THREE.Vector3(ridingBus ? 0.7 : -0.58, ridingBus ? 2.35 : 1.65, ridingBus ? 1.4 : 0.55).applyQuaternion(focus.quaternion);
+        const seatOffset = new THREE.Vector3(ridingBus ? 0.7 : ridingTaxi ? 0.58 : -0.58, ridingBus ? 2.35 : 1.65, ridingBus ? 1.4 : ridingTaxi ? -0.72 : 0.55).applyQuaternion(focus.quaternion);
         const eye = focus.position.clone().add(seatOffset);
         camera.position.lerp(eye, 1 - Math.pow(0.0004, dt));
         camera.lookAt(eye.clone().add(forward.multiplyScalar(18)).add(new THREE.Vector3(0, Math.sin(engine.pitch - 0.45) * 8, 0)));
       } else {
-      const distance = ridingBus ? clamp(engine.zoom * 0.42, 1.5, 6) : engine.zoom + (engine.driving ? 4 : 0);
+      const distance = ridingBus ? clamp(engine.zoom * 0.42, 1.5, 6) : engine.zoom + (engine.driving || ridingTaxi ? 4 : 0);
       const cameraOffset = new THREE.Vector3(
         Math.sin(engine.yaw) * Math.cos(engine.pitch) * distance,
         Math.sin(engine.pitch) * distance + 2,
@@ -5460,6 +5493,7 @@ export default function SecurityConsoleGame() {
         setNearestWalker(engine.nearestWalker);
         setNearBench(Boolean(engine.nearestBench));
         setNearCar(Boolean(currentVehicleRef.current) && car.visible && !engine.driving && player.position.distanceTo(car.position) < 5.2);
+        setNearTaxi(Boolean(taxi.visible && taxiRideRef.current?.stage === "offered" && !engine.driving && player.position.distanceTo(taxi.position) < 7));
         let nextFreightHint = "";
         if (activeFreightJob && !engine.driving) {
           const nearFreightCar = player.position.distanceTo(car.position) < 5.2;
@@ -6420,42 +6454,98 @@ export default function SecurityConsoleGame() {
     };
     const destination = destinations[taxiDestination];
     const tier = tiers[taxiTier];
-    const distanceKm = Math.hypot(destination.x - playerPos.x, destination.z - playerPos.z) / 1000;
+    const player = engineRef.current.player;
+    const taxi = engineRef.current.taxi;
+    if (!player || !taxi) {
+      setTaxiStatus("Таксопарк ещё загружается. Попробуйте через несколько секунд.");
+      return;
+    }
+    const pickup = { x: player.position.x, z: player.position.z };
+    const distanceKm = Math.hypot(destination.x - pickup.x, destination.z - pickup.z) / 1000;
     const price = Math.round(tier.base + distanceKm * tier.perKm);
     if (money < price) {
       setTaxiStatus(`Недостаточно средств: поездка стоит ${price.toLocaleString("ru-RU")} ₽.`);
       return;
     }
-    const start = { x: playerPos.x, z: playerPos.z };
+    const start = pickup;
+    const direction = destination.x >= start.x ? 1 : -1;
+    taxi.position.set(start.x - direction * 75, 0, start.z + (direction > 0 ? 3.5 : -3.5));
+    taxi.rotation.y = direction > 0 ? Math.PI / 2 : -Math.PI / 2;
+    taxi.visible = true;
+    const ride: TaxiRideState = { stage: "arriving", start, destination, price, progress: 0 };
     setTaxiStatus(`${tier.label}: водитель подъезжает. Ожидание ${tier.wait}`);
-    setTaxiRide({ stage: "arriving", start, destination, price, progress: 0 });
-    setMode("taxiRide");
-    window.setTimeout(() => {
-      setTaxiRide((ride) => ride ? { ...ride, stage: "offered" } : null);
-      setTaxiStatus(`Водитель: «До ${destination.label} — ${price.toLocaleString("ru-RU")} ₽. Поехали?»`);
-    }, 1800);
+    taxiRideRef.current = ride;
+    setTaxiRide(ride);
+    setMode("world");
+    flash("Такси выехало к вам · дождитесь автомобиля у дороги");
   };
 
   const acceptTaxiRide = () => {
-    if (!taxiRide || moneyRef.current < taxiRide.price) return;
-    engineRef.current.player && (engineRef.current.player.visible = false);
-    setTaxiRide({ ...taxiRide, stage: "riding", progress: 0 });
+    const ride = taxiRideRef.current;
+    const taxi = engineRef.current.taxi;
+    const player = engineRef.current.player;
+    if (!ride || ride.stage !== "offered" || !taxi || !player || moneyRef.current < ride.price) return;
+    if (player.position.distanceTo(taxi.position) >= 7) return flash("Подойдите ближе к задней двери такси");
+    player.visible = false;
+    const nextRide: TaxiRideState = { ...ride, stage: "riding", start: { x: taxi.position.x, z: taxi.position.z }, progress: 0 };
+    taxiRideRef.current = nextRide;
+    setTaxiRide(nextRide);
+    cameraViewRef.current = "third";
+    setCameraView("third");
+    setMode("taxiRide");
     setTaxiStatus("Вы сидите на заднем сиденье. Такси следует по правой полосе.");
   };
+  taxiBoardRef.current = acceptTaxiRide;
 
   const cancelTaxiRide = () => {
     if (engineRef.current.player) engineRef.current.player.visible = true;
+    if (engineRef.current.taxi) engineRef.current.taxi.visible = false;
     setTaxiStatus("Заказ отменён, оплата не списана.");
+    taxiRideRef.current = null;
     setTaxiRide(null);
     setMode("world");
     flash("Таксист уехал · заказ отменён");
   };
 
   useEffect(() => {
+    if (!taxiRide || taxiRide.stage !== "arriving") return;
+    const taxi = engineRef.current.taxi;
+    if (!taxi) return;
+    const direction = taxiRide.destination.x >= taxiRide.start.x ? 1 : -1;
+    const target = new THREE.Vector3(taxiRide.start.x, 0, taxiRide.start.z + (direction > 0 ? 3.2 : -3.2));
+    let previousAt = performance.now();
+    const timer = window.setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min((now - previousAt) / 1000, 0.1);
+      previousAt = now;
+      const remaining = taxi.position.distanceTo(target);
+      if (remaining <= 0.8) {
+        window.clearInterval(timer);
+        taxi.position.copy(target);
+        const offered: TaxiRideState = { ...taxiRide, stage: "offered" };
+        taxiRideRef.current = offered;
+        setTaxiRide(offered);
+        setTaxiStatus(`Такси подъехало. Подойдите к задней двери и нажмите E · поездка ${taxiRide.price.toLocaleString("ru-RU")} ₽.`);
+        flash("Такси подъехало · подойдите к машине и нажмите E");
+        return;
+      }
+      const step = Math.min(remaining, 13 * dt);
+      const movement = target.clone().sub(taxi.position).normalize();
+      taxi.position.addScaledVector(movement, step);
+      taxi.rotation.y = Math.atan2(movement.x, movement.z);
+    }, 40);
+    return () => window.clearInterval(timer);
+  }, [taxiRide?.stage]);
+
+  useEffect(() => {
     if (!taxiRide || taxiRide.stage !== "riding") return;
+    const taxi = engineRef.current.taxi;
+    if (!taxi) return;
     const distance = Math.hypot(taxiRide.destination.x - taxiRide.start.x, taxiRide.destination.z - taxiRide.start.z);
-    const durationMs = clamp(distance / 120 * 1000, 9000, 30000);
+    const durationMs = clamp(distance / 35 * 1000, 12000, 120000);
     const startedAt = performance.now() - taxiRide.progress * durationMs;
+    let previousX = taxi.position.x;
+    let previousZ = taxi.position.z;
     const timer = window.setInterval(() => {
       const progress = clamp((performance.now() - startedAt) / durationMs, 0, 1);
       const smooth = progress * progress * (3 - 2 * progress);
@@ -6464,21 +6554,38 @@ export default function SecurityConsoleGame() {
       const roadBlend = Math.sin(progress * Math.PI);
       const travelRightLane = taxiRide.destination.x >= taxiRide.start.x ? 3.5 : -3.5;
       const z = THREE.MathUtils.lerp(directZ, travelRightLane, roadBlend * 0.92);
-      const player = engineRef.current.player;
-      if (player) player.position.set(x, 0, z);
+      taxi.position.set(x, 0, z);
+      const moveX = x - previousX;
+      const moveZ = z - previousZ;
+      if (Math.hypot(moveX, moveZ) > 0.001) taxi.rotation.y = Math.atan2(moveX, moveZ);
+      previousX = x;
+      previousZ = z;
       setPlayerPos({ x, z });
-      setTaxiRide((ride) => ride ? { ...ride, progress } : null);
+      setTaxiRide((ride) => {
+        const nextRide = ride ? { ...ride, progress } : null;
+        taxiRideRef.current = nextRide;
+        return nextRide;
+      });
       if (progress >= 1) {
         window.clearInterval(timer);
         moneyRef.current -= taxiRide.price;
         setMoney(moneyRef.current);
-        if (player) { player.position.set(taxiRide.destination.x, 0, taxiRide.destination.z); player.visible = true; }
-        setPlayerPos({ x: taxiRide.destination.x, z: taxiRide.destination.z });
+        const player = engineRef.current.player;
+        const exitSide = taxiRide.destination.x >= taxiRide.start.x ? 3.2 : -3.2;
+        if (player) {
+          player.position.set(taxi.position.x, 0, taxi.position.z + exitSide);
+          player.visible = true;
+          setPlayerPos({ x: player.position.x, z: player.position.z });
+        }
         setTaxiStatus(`Поездка завершена · оплачено ${taxiRide.price.toLocaleString("ru-RU")} ₽.`);
+        taxiRideRef.current = null;
         setTaxiRide(null);
         setMode("world");
         flash(`Такси доставило вас: ${taxiRide.destination.label} · −${taxiRide.price.toLocaleString("ru-RU")} ₽`);
         persistRef.current();
+        window.setTimeout(() => {
+          if (!taxiRideRef.current && engineRef.current.taxi) engineRef.current.taxi.visible = false;
+        }, 3000);
       }
     }, 80);
     return () => window.clearInterval(timer);
@@ -7262,34 +7369,40 @@ export default function SecurityConsoleGame() {
             <span className="map-player" style={{ left: "50%", top: "50%", transform: `translate(-50%, -50%) rotate(${minimapRotates ? 0 : engineRef.current.yaw}rad)` }} />
             {mapWaypoint && waypointDistance !== null && <span className="minimap-distance">◎ {formatDistance(waypointDistance)}</span>}
           </div>
-          {mode === "world" && nearStationId && (!driving || carTelemetry.speed < 5) && (
+          {mode === "world" && !nearTaxi && nearStationId && (!driving || carTelemetry.speed < 5) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>АЗС · заправка и сервис</span>
             </div>
           )}
-          {mode === "world" && !nearStationId && !driving && nearBusStopId && (
+          {mode === "world" && !driving && nearTaxi && (
+            <div className="interaction-prompt">
+              <span className="key">E</span>
+              <span>Сесть в такси · заднее пассажирское место</span>
+            </div>
+          )}
+          {mode === "world" && !nearTaxi && !nearStationId && !driving && nearBusStopId && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>{busEtaMinutes < 0 ? "Автобусы с 06:00" : busReadyAtStop ? "Сесть в автобус" : `Автобус примерно через ${busEtaMinutes} мин`}</span>
             </div>
           )}
-          {mode === "world" && !nearStationId && !nearBusStopId && !driving && nearBench && (
+          {mode === "world" && !nearTaxi && !nearStationId && !nearBusStopId && !driving && nearBench && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>Сесть на скамейку · восстановить энергию</span>
             </div>
           )}
-          {mode === "world" && !nearStationId && !nearBusStopId && !nearBench && !driving && nearbyFishingSpot && (
+          {mode === "world" && !nearTaxi && !nearStationId && !nearBusStopId && !nearBench && !driving && nearbyFishingSpot && (
             <div className="interaction-prompt"><span className="key">E</span><span>Рыбачить · {nearbyFishingSpot.name}</span></div>
           )}
-          {mode === "world" && !nearStationId && !nearBusStopId && !nearBench && !nearbyFishingSpot && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
+          {mode === "world" && !nearTaxi && !nearStationId && !nearBusStopId && !nearBench && !nearbyFishingSpot && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>{driving ? "Выйти из машины" : nearest ? `Обсудить договор · ${nearest.name}` : `Поговорить на улице · ${nearestWalker?.name}`}</span>
             </div>
           )}
-          {mode === "world" && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearBench && !nearStationId && !nearBusStopId && !nearbyFishingSpot && (
+          {mode === "world" && !nearTaxi && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearBench && !nearStationId && !nearBusStopId && !nearbyFishingSpot && (
             <div className="interaction-prompt"><span className="key">E</span><span>Сесть в {VEHICLE_BY_ID[currentVehicle].name.toLowerCase()}</span></div>
           )}
         </div>
@@ -7615,13 +7728,14 @@ export default function SecurityConsoleGame() {
         </section>
       )}
 
-      {mode === "taxiRide" && taxiRide && (
+      {taxiRide && (mode === "world" || mode === "taxiRide") && (
         <section className="taxi-ride-panel">
           <small>🚕 {taxiTier === "comfort" ? "Комфорт" : taxiTier === "van" ? "Микроавтобус" : "Эконом"} · пассажир сзади</small>
-          <b>{taxiRide.stage === "arriving" ? "Такси подъезжает" : taxiRide.stage === "offered" ? "Водитель ожидает решения" : `В пути: ${taxiRide.destination.label}`}</b>
+          <b>{taxiRide.stage === "arriving" ? "Такси едет к вам" : taxiRide.stage === "offered" ? "Такси подъехало" : `В пути: ${taxiRide.destination.label}`}</b>
           <span>{taxiStatus}</span>
           {taxiRide.stage === "riding" && <div className="taxi-trip-progress"><i style={{ width: `${taxiRide.progress * 100}%` }} /><span>{Math.round(taxiRide.progress * 100)}%</span></div>}
-          {taxiRide.stage === "offered" && <div><button className="primary" onClick={acceptTaxiRide}>Поехали · {taxiRide.price.toLocaleString("ru-RU")} ₽</button><button onClick={cancelTaxiRide}>Отмена</button></div>}
+          {taxiRide.stage === "arriving" && <div><button onClick={cancelTaxiRide}>Отменить заказ</button></div>}
+          {taxiRide.stage === "offered" && <div><strong>Подойдите к машине и нажмите E</strong><button onClick={cancelTaxiRide}>Отмена</button></div>}
           {taxiRide.stage === "riding" && <small>ПКМ · осмотреться　O · телефон　Esc · меню</small>}
         </section>
       )}
