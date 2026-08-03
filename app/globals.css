@@ -3812,6 +3812,45 @@ kbd {
   cursor: default;
 }
 
+.food-store-modal .station-sections {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.station-sections article > .food-product-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.food-product-grid button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 64px;
+  text-align: left;
+}
+
+.food-product-grid button > i {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 21px;
+  font-style: normal;
+}
+
+.food-product-grid button > span {
+  display: grid;
+  gap: 3px;
+}
+
+.food-product-grid button small {
+  color: #dceadf;
+  font-size: 9px;
+}
+
 .service-modal > footer {
   margin-top: 18px;
   padding-top: 15px;
