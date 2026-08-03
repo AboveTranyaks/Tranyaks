@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import * as THREE from "three";
 
 type ReplyKind = "info" | "empathy" | "business" | "pressure";
-type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "inventory" | "pause" | "tariff" | "office" | "station" | "transit" | "busRide" | "taxiRide" | "fishing";
+type GameMode = "intro" | "network" | "world" | "dialogue" | "street" | "phone" | "tablet" | "map" | "inventory" | "pause" | "tariff" | "office" | "station" | "store" | "transit" | "busRide" | "taxiRide" | "fishing";
 type OutfitId = "casual" | "manager" | "operator" | "rain";
 type OfficeZone = "console" | "manager" | "rest" | "storage" | "garage";
 type WeatherKind = "Ясно" | "Облачно" | "Дождь" | "Гроза";
@@ -26,7 +26,7 @@ type FishingRodId = "basic" | "spinning" | "premium";
 type FishingLineId = "nylon" | "braid" | "fluorocarbon";
 type FishId = "crucian" | "perch" | "carp" | "pike" | "catfish";
 type FishingPhase = "idle" | "casting" | "waiting" | "bite" | "reeling" | "result";
-type InventoryItemId = "battery" | "leaflet" | "snack" | "coffee" | "toolkit" | "sensor" | "camera" | "cat_food" | "dog_food" | "grain" | "rod_basic" | "rod_spinning" | "rod_premium" | "line_nylon" | "line_braid" | "line_fluoro" | "bait_worm" | "bait_corn" | "lure_fly" | "fishing_box" | "fish_crucian" | "fish_perch" | "fish_carp" | "fish_pike" | "fish_catfish";
+type InventoryItemId = "battery" | "leaflet" | "snack" | "coffee" | "water" | "toolkit" | "sensor" | "camera" | "cat_food" | "dog_food" | "grain" | "rod_basic" | "rod_spinning" | "rod_premium" | "line_nylon" | "line_braid" | "line_fluoro" | "bait_worm" | "bait_corn" | "lure_fly" | "fishing_box" | "fish_crucian" | "fish_perch" | "fish_carp" | "fish_pike" | "fish_catfish";
 type InventoryStack = { id: InventoryItemId; amount: number };
 type FreightJobStatus = "available" | "active" | "completed";
 type FreightJob = {
@@ -517,6 +517,7 @@ const INVENTORY_ITEMS: Record<InventoryItemId, { name: string; slots: number; we
   leaflet: { name: "Буклет", slots: 1, weight: 0.05, icon: "▧" },
   snack: { name: "Снек", slots: 1, weight: 0.2, icon: "◆" },
   coffee: { name: "Кофе", slots: 1, weight: 0.3, icon: "☕" },
+  water: { name: "Вода", slots: 1, weight: 0.5, icon: "●" },
   toolkit: { name: "Набор инструментов", slots: 2, weight: 3.4, icon: "⚒" },
   sensor: { name: "Датчик охраны", slots: 2, weight: 0.8, icon: "◉" },
   camera: { name: "Камера наблюдения", slots: 3, weight: 1.6, icon: "▣" },
@@ -863,6 +864,11 @@ const civilianTrafficDirectionForLane = (laneZ: number): 1 | -1 => (laneZ > 0 ? 
 const GAS_STATIONS = [
   { id: "pervorechenskoe", name: "АЗС «Первореченская»", x: 250, z: -34 },
   { id: "dinskaya", name: "АЗС «Динская»", x: 3750, z: 34 },
+] as const;
+
+const FOOD_STORES = [
+  { id: "pervorechenskoe", name: "Продукты «У дома»", x: 3, z: -15.8 },
+  { id: "dinskaya", name: "Супермаркет «Динской»", x: 3995, z: -18 },
 ] as const;
 
 const OUTFITS: Outfit[] = [
@@ -2188,9 +2194,11 @@ export default function SecurityConsoleGame() {
   const [nearest, setNearest] = useState<Resident | null>(null);
   const [nearestWalker, setNearestWalker] = useState<Walker | null>(null);
   const [nearStationId, setNearStationId] = useState<string | null>(null);
+  const [nearStoreId, setNearStoreId] = useState<string | null>(null);
   const [nearBusStopId, setNearBusStopId] = useState<BusStopSpec["id"] | null>(null);
   const [nearBench, setNearBench] = useState(false);
   const [stationMenu, setStationMenu] = useState<(typeof GAS_STATIONS)[number]["id"] | null>(null);
+  const [storeMenu, setStoreMenu] = useState<(typeof FOOD_STORES)[number]["id"] | null>(null);
   const [transitMenu, setTransitMenu] = useState<BusStopSpec["id"] | null>(null);
   const [serviceBusy, setServiceBusy] = useState("");
   const [busPos, setBusPos] = useState({ x: BUS_STOPS[0].x, z: -3.5 });
@@ -4401,9 +4409,10 @@ export default function SecurityConsoleGame() {
         activeStreetWalkerIdRef.current = null;
         return;
       }
-      if (e.code === "Escape" && (modeRef.current === "station" || modeRef.current === "transit")) {
+      if (e.code === "Escape" && (modeRef.current === "station" || modeRef.current === "store" || modeRef.current === "transit")) {
         engine.keys.clear();
         setStationMenu(null);
+        setStoreMenu(null);
         setTransitMenu(null);
         setMode("world");
         return;
@@ -4455,15 +4464,17 @@ export default function SecurityConsoleGame() {
       if (e.code === "KeyU" && modeRef.current === "world" && !e.repeat) {
         const snack = inventoryRef.current.find((stack) => stack.id === "snack" && stack.amount > 0);
         const coffee = inventoryRef.current.find((stack) => stack.id === "coffee" && stack.amount > 0);
-        if (!snack && !coffee) return flash("В рюкзаке нет еды или напитка");
-        const id: InventoryItemId = hungerRef.current <= thirstRef.current && snack ? "snack" : coffee ? "coffee" : "snack";
+        const water = inventoryRef.current.find((stack) => stack.id === "water" && stack.amount > 0);
+        if (!snack && !coffee && !water) return flash("В рюкзаке нет еды или напитка");
+        const drink = water ? "water" : coffee ? "coffee" : null;
+        const id: InventoryItemId = hungerRef.current <= thirstRef.current && snack ? "snack" : drink ?? "snack";
         const stack = inventoryRef.current.find((item) => item.id === id)!;
         const next = stack.amount === 1 ? inventoryRef.current.filter((item) => item.id !== id) : inventoryRef.current.map((item) => item.id === id ? { ...item, amount: item.amount - 1 } : item);
         inventoryRef.current = next;
         setInventory(next);
         if (id === "snack") { hungerRef.current = clamp(hungerRef.current + 35, 0, 100); setHunger(hungerRef.current); }
-        else { thirstRef.current = clamp(thirstRef.current + 30, 0, 100); setThirst(thirstRef.current); }
-        flash(id === "snack" ? "Алексей перекусил · голод +35" : "Алексей выпил кофе · жажда +30");
+        else { thirstRef.current = clamp(thirstRef.current + (id === "water" ? 40 : 30), 0, 100); setThirst(thirstRef.current); }
+        flash(id === "snack" ? "Алексей перекусил · голод +35" : id === "water" ? "Алексей выпил воду · жажда +40" : "Алексей выпил кофе · жажда +30");
         persistRef.current();
         return;
       }
@@ -4484,6 +4495,18 @@ export default function SecurityConsoleGame() {
         ) {
           engine.keys.clear();
           taxiBoardRef.current();
+          return;
+        }
+        const closestStore = FOOD_STORES.reduce((closest, store) =>
+          Math.hypot(focus.position.x - store.x, focus.position.z - store.z) <
+          Math.hypot(focus.position.x - closest.x, focus.position.z - closest.z)
+            ? store
+            : closest,
+        );
+        if (!engine.driving && Math.hypot(focus.position.x - closestStore.x, focus.position.z - closestStore.z) < 7) {
+          engine.keys.clear();
+          setStoreMenu(closestStore.id);
+          setMode("store");
           return;
         }
         if (!engine.driving && freightInteractionRef.current()) return;
@@ -5567,6 +5590,13 @@ export default function SecurityConsoleGame() {
             : closest,
         );
         setNearStationId(Math.hypot(focus.position.x - nearbyStation.x, focus.position.z - nearbyStation.z) < 28 ? nearbyStation.id : null);
+        const nearbyStore = FOOD_STORES.reduce((closest, store) =>
+          Math.hypot(player.position.x - store.x, player.position.z - store.z) <
+          Math.hypot(player.position.x - closest.x, player.position.z - closest.z)
+            ? store
+            : closest,
+        );
+        setNearStoreId(!engine.driving && Math.hypot(player.position.x - nearbyStore.x, player.position.z - nearbyStore.z) < 7 ? nearbyStore.id : null);
         setBusPos({ x: bus.position.x, z: bus.position.z });
         setBusReadyAtStop(busOperating && busDwellGameHours > 0 && Math.abs(bus.position.x - nearbyStop.x) < 20);
         setBusEtaMinutes(
@@ -6299,6 +6329,21 @@ export default function SecurityConsoleGame() {
     flash(`Покупка оформлена · −${price.toLocaleString("ru-RU")} ₽`);
   };
 
+  const buyFoodStoreItem = (item: "snack" | "water", amount = 1) => {
+    const unitPrice = item === "snack" ? 60 : 35;
+    const price = unitPrice * amount;
+    if (moneyRef.current < price) return flash(`Не хватает ${(price - moneyRef.current).toLocaleString("ru-RU")} ₽`);
+    const nextInventory = inventoryRef.current.some((stack) => stack.id === item)
+      ? inventoryRef.current.map((stack) => stack.id === item ? { ...stack, amount: stack.amount + amount } : stack)
+      : [...inventoryRef.current, { id: item, amount }];
+    inventoryRef.current = nextInventory;
+    setInventory(nextInventory);
+    moneyRef.current -= price;
+    setMoney(moneyRef.current);
+    persist(residentsRef.current, moneyRef.current, reputation);
+    flash(`${item === "snack" ? "Еда" : "Вода"} ×${amount} куплена · −${price.toLocaleString("ru-RU")} ₽`);
+  };
+
   const closeBusinessMonth = () => {
     const interest = loanRef.current ? Math.round(loanRef.current.principal * 0.1) : 0;
     const result = monthlyIncome - monthlyExpenses - interest;
@@ -6469,7 +6514,7 @@ export default function SecurityConsoleGame() {
     }
     const start = pickup;
     const direction = destination.x >= start.x ? 1 : -1;
-    taxi.position.set(start.x - direction * 75, 0, start.z + (direction > 0 ? 3.5 : -3.5));
+    taxi.position.set(start.x - direction * 75, 0, laneZForDirection(direction, 3.5));
     taxi.rotation.y = direction > 0 ? Math.PI / 2 : -Math.PI / 2;
     taxi.visible = true;
     const ride: TaxiRideState = { stage: "arriving", start, destination, price, progress: 0 };
@@ -6512,8 +6557,9 @@ export default function SecurityConsoleGame() {
     const taxi = engineRef.current.taxi;
     if (!taxi) return;
     const direction = taxiRide.destination.x >= taxiRide.start.x ? 1 : -1;
-    const target = new THREE.Vector3(taxiRide.start.x, 0, taxiRide.start.z + (direction > 0 ? 3.2 : -3.2));
+    const target = new THREE.Vector3(taxiRide.start.x, 0, laneZForDirection(direction, 3.5));
     let previousAt = performance.now();
+    let approachSpeed = 0;
     let animationFrame = 0;
     const animateArrival = (now: number) => {
       const dt = Math.min((now - previousAt) / 1000, 0.1);
@@ -6528,8 +6574,25 @@ export default function SecurityConsoleGame() {
         flash("Такси подъехало · подойдите к машине и нажмите E");
         return;
       }
-      const step = Math.min(remaining, 13 * dt);
       const movement = target.clone().sub(taxi.position).normalize();
+      const obstacleAhead = (object: THREE.Object3D, radius: number) => {
+        if (!object.visible) return false;
+        const offset = object.position.clone().sub(taxi.position);
+        const forwardDistance = offset.dot(movement);
+        const lateralDistance = Math.abs(offset.x * movement.z - offset.z * movement.x);
+        return forwardDistance > 0.5 && forwardDistance < 12 + approachSpeed * 1.2 && lateralDistance < radius;
+      };
+      const engine = engineRef.current;
+      const blocked =
+        Boolean(engine.car?.visible && obstacleAhead(engine.car, 3.8)) ||
+        Boolean(engine.bus?.visible && obstacleAhead(engine.bus, 4.5)) ||
+        engine.traffic.some((vehicle) => obstacleAhead(vehicle.mesh, 3.5)) ||
+        engine.residents.some((resident) => Boolean(resident.mesh && obstacleAhead(resident.mesh, 2.8))) ||
+        engine.walkers.some((walker) => obstacleAhead(walker.mesh, 2.8)) ||
+        engine.busPassengers.some((passenger) => passenger.state !== "riding" && obstacleAhead(passenger.mesh, 2.8));
+      const targetApproachSpeed = blocked ? 0 : 13;
+      approachSpeed += clamp(targetApproachSpeed - approachSpeed, -8 * dt, 3 * dt);
+      const step = Math.min(remaining, approachSpeed * dt);
       taxi.position.addScaledVector(movement, step);
       const desiredYaw = Math.atan2(movement.x, movement.z);
       const yawDelta = Math.atan2(Math.sin(desiredYaw - taxi.rotation.y), Math.cos(desiredYaw - taxi.rotation.y));
@@ -6545,19 +6608,40 @@ export default function SecurityConsoleGame() {
     const taxi = engineRef.current.taxi;
     if (!taxi) return;
     const distance = Math.hypot(taxiRide.destination.x - taxiRide.start.x, taxiRide.destination.z - taxiRide.start.z);
-    const durationMs = clamp(distance / 35 * 1000, 12000, 120000);
-    const startedAt = performance.now() - taxiRide.progress * durationMs;
+    const direction: 1 | -1 = taxiRide.destination.x >= taxiRide.start.x ? 1 : -1;
+    let progress = taxiRide.progress;
+    let previousAt = performance.now();
+    let currentSpeed = 0;
     let previousX = taxi.position.x;
     let previousZ = taxi.position.z;
     let lastUiUpdateAt = 0;
     let animationFrame = 0;
     const animateRide = (now: number) => {
-      const progress = clamp((now - startedAt) / durationMs, 0, 1);
+      const dt = Math.min((now - previousAt) / 1000, 0.08);
+      previousAt = now;
+      const residential = taxi.position.x < 450 || taxi.position.x > 3550;
+      const speedLimit = (residential ? 40 : 90) / 3.6;
+      const obstacleAhead = (object: THREE.Object3D, laneTolerance: number, clearance: number) => {
+        if (!object.visible) return false;
+        const forwardDistance = (object.position.x - taxi.position.x) * direction;
+        return forwardDistance > 0.4 && forwardDistance < clearance && Math.abs(object.position.z - taxi.position.z) < laneTolerance;
+      };
+      const stoppingDistance = 10 + currentSpeed * 1.65;
+      const engine = engineRef.current;
+      const blocked =
+        Boolean(engine.player?.visible && obstacleAhead(engine.player, 3.2, stoppingDistance)) ||
+        Boolean(engine.car?.visible && obstacleAhead(engine.car, 3.8, stoppingDistance)) ||
+        Boolean(engine.bus?.visible && obstacleAhead(engine.bus, 4.5, stoppingDistance + 5)) ||
+        engine.traffic.some((vehicle) => obstacleAhead(vehicle.mesh, 3.5, stoppingDistance)) ||
+        engine.residents.some((resident) => Boolean(resident.mesh && obstacleAhead(resident.mesh, 2.8, stoppingDistance))) ||
+        engine.walkers.some((walker) => obstacleAhead(walker.mesh, 2.8, stoppingDistance)) ||
+        engine.busPassengers.some((passenger) => passenger.state !== "riding" && obstacleAhead(passenger.mesh, 2.8, stoppingDistance));
+      const targetSpeed = blocked ? 0 : speedLimit;
+      const speedChange = (targetSpeed > currentSpeed ? 2.8 : 8.5) * dt;
+      currentSpeed = THREE.MathUtils.lerp(currentSpeed, targetSpeed, clamp(speedChange / Math.max(1, Math.abs(targetSpeed - currentSpeed)), 0, 1));
+      if (!blocked || currentSpeed > 0.15) progress = clamp(progress + currentSpeed * dt / Math.max(distance, 1), 0, 1);
       const x = THREE.MathUtils.lerp(taxiRide.start.x, taxiRide.destination.x, progress);
-      const directZ = THREE.MathUtils.lerp(taxiRide.start.z, taxiRide.destination.z, progress);
-      const roadBlend = Math.sin(progress * Math.PI);
-      const travelRightLane = taxiRide.destination.x >= taxiRide.start.x ? 3.5 : -3.5;
-      const z = THREE.MathUtils.lerp(directZ, travelRightLane, roadBlend * 0.92);
+      const z = laneZForDirection(direction, 3.5);
       taxi.position.set(x, 0, z);
       const moveX = x - previousX;
       const moveZ = z - previousZ;
@@ -6584,8 +6668,20 @@ export default function SecurityConsoleGame() {
         const exitSide = taxiRide.destination.x >= taxiRide.start.x ? 3.2 : -3.2;
         if (player) {
           player.position.set(taxi.position.x, 0, taxi.position.z + exitSide);
+          player.rotation.y = taxi.rotation.y;
           player.visible = true;
           setPlayerPos({ x: player.position.x, z: player.position.z });
+          const cameraTarget = player.position.clone().add(new THREE.Vector3(0, 3, 0));
+          const camera = engineRef.current.camera;
+          engineRef.current.yaw = player.rotation.y + Math.PI;
+          engineRef.current.pitch = 0.52;
+          engineRef.current.zoom = 14;
+          cameraViewRef.current = "third";
+          setCameraView("third");
+          if (camera) {
+            camera.position.set(cameraTarget.x - 12 * direction, cameraTarget.y + 8, cameraTarget.z);
+            camera.lookAt(cameraTarget);
+          }
         }
         setTaxiStatus(`Поездка завершена · оплачено ${taxiRide.price.toLocaleString("ru-RU")} ₽.`);
         taxiRideRef.current = null;
@@ -7382,40 +7478,46 @@ export default function SecurityConsoleGame() {
             <span className="map-player" style={{ left: "50%", top: "50%", transform: `translate(-50%, -50%) rotate(${minimapRotates ? 0 : engineRef.current.yaw}rad)` }} />
             {mapWaypoint && waypointDistance !== null && <span className="minimap-distance">◎ {formatDistance(waypointDistance)}</span>}
           </div>
-          {mode === "world" && !nearTaxi && nearStationId && (!driving || carTelemetry.speed < 5) && (
+          {mode === "world" && !driving && nearStoreId && (
+            <div className="interaction-prompt">
+              <span className="key">E</span>
+              <span>Войти в продуктовый магазин</span>
+            </div>
+          )}
+          {mode === "world" && !nearStoreId && !nearTaxi && nearStationId && (!driving || carTelemetry.speed < 5) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>АЗС · заправка и сервис</span>
             </div>
           )}
-          {mode === "world" && !driving && nearTaxi && (
+          {mode === "world" && !nearStoreId && !driving && nearTaxi && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>Сесть в такси · заднее пассажирское место</span>
             </div>
           )}
-          {mode === "world" && !nearTaxi && !nearStationId && !driving && nearBusStopId && (
+          {mode === "world" && !nearStoreId && !nearTaxi && !nearStationId && !driving && nearBusStopId && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>{busEtaMinutes < 0 ? "Автобусы с 06:00" : busReadyAtStop ? "Сесть в автобус" : `Автобус примерно через ${busEtaMinutes} мин`}</span>
             </div>
           )}
-          {mode === "world" && !nearTaxi && !nearStationId && !nearBusStopId && !driving && nearBench && (
+          {mode === "world" && !nearStoreId && !nearTaxi && !nearStationId && !nearBusStopId && !driving && nearBench && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>Сесть на скамейку · восстановить энергию</span>
             </div>
           )}
-          {mode === "world" && !nearTaxi && !nearStationId && !nearBusStopId && !nearBench && !driving && nearbyFishingSpot && (
+          {mode === "world" && !nearStoreId && !nearTaxi && !nearStationId && !nearBusStopId && !nearBench && !driving && nearbyFishingSpot && (
             <div className="interaction-prompt"><span className="key">E</span><span>Рыбачить · {nearbyFishingSpot.name}</span></div>
           )}
-          {mode === "world" && !nearTaxi && !nearStationId && !nearBusStopId && !nearBench && !nearbyFishingSpot && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
+          {mode === "world" && !nearStoreId && !nearTaxi && !nearStationId && !nearBusStopId && !nearBench && !nearbyFishingSpot && (nearest || nearestWalker || (driving && carTelemetry.speed < 5)) && (
             <div className="interaction-prompt">
               <span className="key">E</span>
               <span>{driving ? "Выйти из машины" : nearest ? `Обсудить договор · ${nearest.name}` : `Поговорить на улице · ${nearestWalker?.name}`}</span>
             </div>
           )}
-          {mode === "world" && !nearTaxi && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearBench && !nearStationId && !nearBusStopId && !nearbyFishingSpot && (
+          {mode === "world" && !nearStoreId && !nearTaxi && !driving && currentVehicle && nearCar && !nearest && !nearestWalker && !nearBench && !nearStationId && !nearBusStopId && !nearbyFishingSpot && (
             <div className="interaction-prompt"><span className="key">E</span><span>Сесть в {VEHICLE_BY_ID[currentVehicle].name.toLowerCase()}</span></div>
           )}
         </div>
@@ -7642,6 +7744,35 @@ export default function SecurityConsoleGame() {
               </aside>
             </div>
             <footer><span>ESC · закончить рыбалку</span><span>ПКМ / пробел · подсечка</span><span>A / D · натяжение лески</span></footer>
+          </div>
+        </section>
+      )}
+
+      {mode === "store" && storeMenu && (
+        <section className="overlay service-overlay">
+          <div className="service-modal food-store-modal">
+            <header>
+              <div><small>Продуктовый магазин · 07:00–23:00</small><h1>{FOOD_STORES.find((store) => store.id === storeMenu)?.name}</h1></div>
+              <button onClick={() => { setStoreMenu(null); setMode("world"); }}>×</button>
+            </header>
+            <div className="station-status">
+              <span>Баланс <b>{money.toLocaleString("ru-RU")} ₽</b></span>
+              <span>Голод <b>{Math.round(hunger)}%</b></span>
+              <span>Жажда <b>{Math.round(thirst)}%</b></span>
+            </div>
+            <div className="station-sections">
+              <article>
+                <h2>◆ Еда</h2>
+                <p>Покупка попадает в рюкзак. Нажмите U в мире, чтобы перекусить.</p>
+                <div><button onClick={() => buyFoodStoreItem("snack")}>1 порция · 60 ₽</button><button onClick={() => buyFoodStoreItem("snack", 3)}>3 порции · 180 ₽</button></div>
+              </article>
+              <article>
+                <h2>● Питьевая вода</h2>
+                <p>Бутылка восстанавливает 40 единиц жажды. Использование — клавиша U.</p>
+                <div><button onClick={() => buyFoodStoreItem("water")}>1 бутылка · 35 ₽</button><button onClick={() => buyFoodStoreItem("water", 3)}>3 бутылки · 105 ₽</button></div>
+              </article>
+            </div>
+            <footer><span>E у двери · открыть магазин　U · использовать еду или воду</span><button onClick={() => { setStoreMenu(null); setMode("world"); }}>Выйти</button></footer>
           </div>
         </section>
       )}
