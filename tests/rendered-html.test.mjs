@@ -564,11 +564,28 @@ test("keeps buses moving during taxi rides and provides safe overtaking with var
 });
 
 test("returns camera control to the player in the same frame after a taxi ride", async () => {
-  const source = await readFile(sourceUrl, "utf8");
+  const [source, styles] = await Promise.all([readFile(sourceUrl, "utf8"), readFile(stylesUrl, "utf8")]);
 
   assert.match(source, /taxiRideRef\.current = null;[\s\S]*modeRef\.current = "world"/);
   assert.match(source, /cameraViewRef\.current = "third"/);
   assert.match(source, /engine\.cameraInputAt = performance\.now\(\)/);
   assert.match(source, /player\.position\.set\(taxi\.position\.x[\s\S]*restoreOnFootCamera\(player\)/);
   assert.match(source, /setPlayerPos\(\{ x: player\.position\.x, z: player\.position\.z \}\);[\s\S]*setMode\("world"\)/);
+  assert.match(source, /const nextRide: TaxiRideState = \{ \.\.\.taxiRide, progress \}/);
+  assert.match(source, /taxi\.visible = false;[\s\S]*setTaxiRide\(null\)/);
+  assert.doesNotMatch(source, /Вы сидите на заднем сиденье\. Такси следует по правой полосе\.<\/span>/);
+  assert.match(styles, /\.taxi-ride-panel\.compact/);
+});
+
+test("builds a visible five-storey residential quarter in Dinskaya", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /const addFiveStoreyBuilding =/);
+  assert.match(source, /\[3870, 3955, 4045, 4130\]\.forEach/);
+  assert.match(source, /addFiveStoreyBuilding\(buildingX, -190/);
+  assert.match(source, /addFiveStoreyBuilding\(buildingX, -250/);
+  assert.match(source, /УЛИЦА ЛЕНИНА · ЖИЛОЙ КВАРТАЛ/);
+  assert.match(source, /const urbanResidentCount = 96/);
+  assert.match(source, /activationRadius: 150/);
+  assert.match(source, /Жилой квартал · ул\. Ленина/);
 });
