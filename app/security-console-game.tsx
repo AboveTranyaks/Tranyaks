@@ -2613,6 +2613,44 @@ export default function SecurityConsoleGame() {
     modeRef.current = mode;
   }, [mode]);
 
+  const restoreOnFootCamera = useCallback((player: THREE.Group) => {
+    const engine = engineRef.current;
+    const camera = engine.camera;
+
+    engine.keys.clear();
+    engine.driving = false;
+    engine.carSpeed = 0;
+    player.visible = true;
+
+    // Passenger state lives outside React's render cycle. Clear it and switch
+    // the camera target in the same frame so the departing taxi cannot reclaim
+    // the camera for one more animation tick.
+    taxiRideRef.current = null;
+    modeRef.current = "world";
+    cameraViewRef.current = "third";
+    setCameraView("third");
+
+    engine.yaw = player.rotation.y + Math.PI;
+    engine.pitch = 0.52;
+    engine.zoom = 14;
+    engine.cameraInputAt = performance.now();
+
+    if (camera) {
+      const target = player.position.clone().add(new THREE.Vector3(0, 3, 0));
+      const offset = new THREE.Vector3(
+        Math.sin(engine.yaw) * Math.cos(engine.pitch) * engine.zoom,
+        Math.sin(engine.pitch) * engine.zoom + 2,
+        Math.cos(engine.yaw) * Math.cos(engine.pitch) * engine.zoom,
+      );
+      camera.position.copy(target.clone().add(offset));
+      camera.lookAt(target);
+      camera.updateMatrixWorld(true);
+    }
+
+    setPlayerPos({ x: player.position.x, z: player.position.z });
+    setMode("world");
+  }, []);
+
   const applyAudioMix = useCallback((mix: AudioMix) => {
     const audio = audioEngineRef.current;
     if (!audio) return;
@@ -6724,24 +6762,10 @@ export default function SecurityConsoleGame() {
         if (player) {
           player.position.set(taxi.position.x, 0, taxi.position.z + exitSide);
           player.rotation.y = taxi.rotation.y;
-          player.visible = true;
-          setPlayerPos({ x: player.position.x, z: player.position.z });
-          const cameraTarget = player.position.clone().add(new THREE.Vector3(0, 3, 0));
-          const camera = engineRef.current.camera;
-          engineRef.current.yaw = player.rotation.y + Math.PI;
-          engineRef.current.pitch = 0.52;
-          engineRef.current.zoom = 14;
-          cameraViewRef.current = "third";
-          setCameraView("third");
-          if (camera) {
-            camera.position.set(cameraTarget.x - 12 * direction, cameraTarget.y + 8, cameraTarget.z);
-            camera.lookAt(cameraTarget);
-          }
+          restoreOnFootCamera(player);
         }
         setTaxiStatus(`Поездка завершена · оплачено ${taxiRide.price.toLocaleString("ru-RU")} ₽.`);
-        taxiRideRef.current = null;
         setTaxiRide(null);
-        setMode("world");
         flash(`Такси доставило вас: ${taxiRide.destination.label} · −${taxiRide.price.toLocaleString("ru-RU")} ₽`);
         persistRef.current();
         window.setTimeout(() => {
@@ -6753,7 +6777,7 @@ export default function SecurityConsoleGame() {
     };
     animationFrame = window.requestAnimationFrame(animateRide);
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [taxiRide?.stage]);
+  }, [restoreOnFootCamera, taxiRide?.stage]);
 
   const capturePhonePhoto = () => {
     const canvas = engineRef.current.renderer?.domElement;

@@ -537,7 +537,8 @@ test("keeps taxis in their lane, yields safely, resets the camera, and enables g
   assert.match(source, /const speedLimit = \(residential \? 40 : 90\) \/ 3\.6/);
   assert.match(source, /const objectInLane = \(object: THREE\.Object3D/);
   assert.match(source, /const vehicleBlocked = vehicles\.some/);
-  assert.match(source, /camera\.position\.set\(cameraTarget\.x - 12 \* direction/);
+  assert.match(source, /const restoreOnFootCamera = useCallback/);
+  assert.match(source, /camera\.position\.copy\(target\.clone\(\)\.add\(offset\)\)/);
   assert.match(source, /const FOOD_STORES = \[/);
   assert.match(source, /Войти в продуктовый магазин/);
   assert.match(source, /buyFoodStoreItem\(product\.id\)/);
@@ -560,4 +561,14 @@ test("keeps buses moving during taxi rides and provides safe overtaking with var
   assert.match(source, /Бутерброд/);
   assert.match(source, /Сэндвич/);
   assert.match(styles, /\.food-product-grid/);
+});
+
+test("returns camera control to the player in the same frame after a taxi ride", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /taxiRideRef\.current = null;[\s\S]*modeRef\.current = "world"/);
+  assert.match(source, /cameraViewRef\.current = "third"/);
+  assert.match(source, /engine\.cameraInputAt = performance\.now\(\)/);
+  assert.match(source, /player\.position\.set\(taxi\.position\.x[\s\S]*restoreOnFootCamera\(player\)/);
+  assert.match(source, /setPlayerPos\(\{ x: player\.position\.x, z: player\.position\.z \}\);[\s\S]*setMode\("world"\)/);
 });
