@@ -1611,7 +1611,7 @@ function makeWildlife(kind: WildlifeKind, color: number) {
   const isBird = kind === "bird" || kind === "stork";
   const isFarm = kind === "cow" || kind === "horse";
   const body = new THREE.Mesh(
-    isBird ? new THREE.IcosahedronGeometry(0.32, 0) : new THREE.IcosahedronGeometry(isFarm ? 0.82 : 0.48, 1),
+    isBird ? new THREE.SphereGeometry(0.34, 10, 6) : new THREE.IcosahedronGeometry(isFarm ? 0.82 : 0.48, 1),
     material,
   );
   body.scale.set(isBird ? 1.25 : 1.45, isBird ? 0.72 : 0.85, isBird ? 0.8 : 0.82);
@@ -1629,17 +1629,61 @@ function makeWildlife(kind: WildlifeKind, color: number) {
       group.add(wing);
     }
   } else if (isBird) {
+    const birdScale = kind === "stork" ? 1.45 : 1;
+    const featherMaterial = mat(kind === "stork" ? 0xe8e6dc : color + 0x101010);
     for (const side of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.ConeGeometry(kind === "stork" ? 0.58 : 0.38, kind === "stork" ? 1.6 : 0.9, 3), material);
-      wing.position.set(side * 0.55, 0.76, 0);
-      wing.rotation.z = side * Math.PI / 2;
+      const wing = new THREE.Group();
+      wing.position.set(side * 0.28, 0.78, -0.02);
       wing.name = side < 0 ? "leftWing" : "rightWing";
+
+      // Rounded overlapping feathers keep the low-poly style without the old
+      // triangular "bat wing" silhouette.
+      const cover = new THREE.Mesh(new THREE.SphereGeometry(0.28, 9, 5), material);
+      cover.scale.set(1.35 * birdScale, 0.16, 0.78);
+      cover.position.set(side * 0.2 * birdScale, 0, 0.02);
+      wing.add(cover);
+      for (let featherIndex = 0; featherIndex < 4; featherIndex++) {
+        const feather = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 5), featherMaterial);
+        const length = (0.92 - featherIndex * 0.1) * birdScale;
+        feather.scale.set(length, 0.12, 0.34);
+        feather.position.set(side * (0.38 + featherIndex * 0.13) * birdScale, -0.015 * featherIndex, -0.03 - featherIndex * 0.055);
+        feather.rotation.y = side * (0.08 + featherIndex * 0.045);
+        feather.name = `wingFeather${featherIndex}`;
+        wing.add(feather);
+      }
       group.add(wing);
     }
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(kind === "stork" ? 0.23 : 0.25, 10, 6), material);
+    head.position.set(0, kind === "stork" ? 1.22 : 0.9, kind === "stork" ? 0.35 : 0.3);
+    group.add(head);
+    if (kind === "stork") {
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.72, 8), material);
+      neck.position.set(0, 0.96, 0.17);
+      neck.rotation.x = -0.28;
+      group.add(neck);
+    }
     const beak = new THREE.Mesh(new THREE.ConeGeometry(0.09, kind === "stork" ? 0.72 : 0.35, 5), mat(0xe0a23d));
-    beak.position.set(0, 0.78, 0.48);
+    beak.position.set(0, kind === "stork" ? 1.22 : 0.9, kind === "stork" ? 0.82 : 0.61);
     beak.rotation.x = Math.PI / 2;
     group.add(beak);
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.025, 7, 5), dark);
+      eye.position.set(side * (kind === "stork" ? 0.15 : 0.16), kind === "stork" ? 1.29 : 0.98, kind === "stork" ? 0.53 : 0.49);
+      group.add(eye);
+
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.032, kind === "stork" ? 0.72 : 0.32, 6), mat(0xc78642));
+      leg.position.set(side * 0.1, kind === "stork" ? 0.36 : 0.3, -0.02);
+      leg.name = side < 0 ? "birdLeftLeg" : "birdRightLeg";
+      group.add(leg);
+    }
+    for (let featherIndex = -1; featherIndex <= 1; featherIndex++) {
+      const tailFeather = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 5), featherMaterial);
+      tailFeather.scale.set(0.5, 0.12, kind === "stork" ? 2.6 : 1.7);
+      tailFeather.position.set(featherIndex * 0.1, 0.72, kind === "stork" ? -0.6 : -0.43);
+      tailFeather.rotation.x = 0.12;
+      group.add(tailFeather);
+    }
   } else {
     const head = new THREE.Mesh(new THREE.IcosahedronGeometry(isFarm ? 0.5 : 0.34, 1), material);
     head.position.set(0, isFarm ? 1.42 : 0.82, isFarm ? 0.85 : 0.55);
@@ -5522,9 +5566,15 @@ export default function SecurityConsoleGame() {
         }
         const leftWing = animal.mesh.getObjectByName("leftWing");
         const rightWing = animal.mesh.getObjectByName("rightWing");
-        const wingAngle = animal.airborne ? Math.sin(animal.phase * 7) * 0.72 : 0.08;
-        if (leftWing) leftWing.rotation.z = wingAngle;
-        if (rightWing) rightWing.rotation.z = -wingAngle;
+        const wingAngle = animal.airborne ? Math.sin(animal.phase * 7) * 0.62 : 0.18;
+        if (leftWing) {
+          leftWing.rotation.z = wingAngle;
+          leftWing.rotation.x = animal.airborne ? -0.08 : 0.32;
+        }
+        if (rightWing) {
+          rightWing.rotation.z = -wingAngle;
+          rightWing.rotation.x = animal.airborne ? -0.08 : 0.32;
+        }
         const tail = animal.mesh.getObjectByName("tail");
         if (tail) tail.rotation.z = Math.sin(animal.phase * 4) * 0.26;
         for (let legIndex = 0; legIndex < 4; legIndex++) {
