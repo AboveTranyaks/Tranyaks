@@ -75,7 +75,7 @@ type BirdFlockState = {
   members: WildlifeAgent[];
   landingPoints: THREE.Vector3[];
   targetIndex: number;
-  state: "ground" | "flying" | "landing";
+  state: "ground" | "flying" | "landing" | "perched";
   nextStateAt: number;
 };
 
@@ -1445,6 +1445,7 @@ function makeTree(scene: THREE.Object3D, x: number, z: number, scale = 1) {
   group.add(trunk, crown);
   group.position.set(x, 0, z);
   group.rotation.y = (x * z) % 2;
+  group.userData.birdPerch = new THREE.Vector3(x, 5.72 * scale, z);
   scene.add(group);
 }
 
@@ -4393,6 +4394,14 @@ export default function SecurityConsoleGame() {
     let wildlifeId = 0;
     let nextBirdFlockId = 0;
     const birdFlocks = new Map<number, BirdFlockState>();
+    const treePerches: THREE.Vector3[] = [];
+    scene.traverse((object) => {
+      const perch = object.userData.birdPerch;
+      if (perch instanceof THREE.Vector3) treePerches.push(perch.clone());
+    });
+    const staticLandingBlocked = (x: number, z: number, radius: number) =>
+      engine.colliders.some((collider) => touchesBox(x, z, radius, collider)) ||
+      engine.residents.some((resident) => resident.mesh && Math.hypot(x - resident.mesh.position.x, z - resident.mesh.position.z) < radius + 1.1);
     wildlifeSeeds.forEach((seed) => {
       const isFlockingBird = seed.kind === "bird" || seed.kind === "stork";
       const flockBaseId = nextBirdFlockId;
@@ -4436,7 +4445,7 @@ export default function SecurityConsoleGame() {
         if (flockId !== null) {
           let flock = birdFlocks.get(flockId);
           if (!flock) {
-            const landingPoints = Array.from({ length: 24 }, (_, pointIndex) => {
+            const groundLandingPoints = Array.from({ length: 48 }, (_, pointIndex) => {
               const pointAngle = pointIndex * 2.399963 + flockId * 0.63;
               const pointRadius = seed.radius * (0.16 + ((pointIndex * 37 + flockId * 19) % 78) / 100);
               return new THREE.Vector3(
@@ -4444,12 +4453,19 @@ export default function SecurityConsoleGame() {
                 0,
                 clamp(seed.z + Math.sin(pointAngle) * pointRadius, -158, 158),
               );
-            });
+            }).filter((point) => !staticLandingBlocked(point.x, point.z, 1.2)).slice(0, 24);
+            const nearbyTreePerches = treePerches
+              .filter((point) => Math.hypot(point.x - seed.x, point.z - seed.z) <= seed.radius * 1.05)
+              .sort((a, b) => Math.hypot(a.x - seed.x, a.z - seed.z) - Math.hypot(b.x - seed.x, b.z - seed.z))
+              .filter((_, pointIndex) => pointIndex % 2 === flockId % 2)
+              .slice(0, 16)
+              .map((point) => point.clone());
+            const landingPoints = [...groundLandingPoints, ...nearbyTreePerches];
             flock = {
               id: flockId,
               members: [],
               landingPoints,
-              targetIndex: (flockId * 7) % landingPoints.length,
+              targetIndex: (flockId * 7) % Math.max(groundLandingPoints.length, 1),
               state: "ground",
               nextStateAt: performance.now() + 7000 + (flockId % 5) * 1700,
             };
@@ -5009,6 +5025,45 @@ export default function SecurityConsoleGame() {
       return false;
     };
 
+    const birdLandingTarget = (flock: BirdFlockState, member: WildlifeAgent) => {
+      const landing = flock.landingPoints[flock.targetIndex];
+      const perchScale = landing.y > 1 ? 0.36 : 1;
+      return new THREE.Vector3(
+        landing.x + member.flockOffset.x * perchScale,
+        landing.y,
+        landing.z + member.flockOffset.z * perchScale,
+      );
+    };
+
+    const birdFlightDirection = (position: THREE.Vector3, target: THREE.Vector3) => {
+      const direct = target.clone().sub(position);
+      const horizontalDistance = Math.hypot(direct.x, direct.z);
+      if (horizontalDistance < 0.05) return direct.normalize();
+      const directAngle = Math.atan2(direct.z, direct.x);
+      const lookAhead = clamp(horizontalDistance, 2.8, 7.5);
+      const steeringAngles = [0, 0.45, -0.45, 0.85, -0.85, 1.25, -1.25, Math.PI];
+      for (const steeringAngle of steeringAngles) {
+        const angle = directAngle + steeringAngle;
+        let routeIsClear = true;
+        for (let probeDistance = 1.2; probeDistance <= lookAhead; probeDistance += 1.2) {
+          const x = position.x + Math.cos(angle) * probeDistance;
+          const z = position.z + Math.sin(angle) * probeDistance;
+          if (isBlocked(x, z, 1.35, true)) {
+            routeIsClear = false;
+            break;
+          }
+        }
+        if (!routeIsClear) continue;
+        const candidate = new THREE.Vector3(
+          Math.cos(angle),
+          direct.y / Math.max(horizontalDistance, 1),
+          Math.sin(angle),
+        );
+        return candidate.normalize();
+      }
+      return new THREE.Vector3(-Math.sin(directAngle), 0.35, Math.cos(directAngle)).normalize();
+    };
+
     let animation = 0;
     const animate = (now: number) => {
       animation = requestAnimationFrame(animate);
@@ -5418,13 +5473,29 @@ export default function SecurityConsoleGame() {
         if (rightArm) rightArm.rotation.x = 0.45 - Math.sin(now * 0.006 + index) * 0.42;
       });
       birdFlocks.forEach((flock) => {
-        const landingPoint = flock.landingPoints[flock.targetIndex];
+        let landingPoint = flock.landingPoints[flock.targetIndex];
         const playerIsNear = flock.members.some((member) =>
           Math.hypot(member.mesh.position.x - player.position.x, member.mesh.position.z - player.position.z) < 7,
         );
-        if (flock.state === "ground" && (playerIsNear || now >= flock.nextStateAt)) {
-          const pointOffset = 1 + Math.floor(Math.random() * (flock.landingPoints.length - 1));
-          flock.targetIndex = (flock.targetIndex + pointOffset) % flock.landingPoints.length;
+        if ((flock.state === "ground" || flock.state === "perched") && (playerIsNear || now >= flock.nextStateAt)) {
+          const treeIndexes = flock.landingPoints
+            .map((point, index) => point.y > 1 ? index : -1)
+            .filter((index) => index >= 0);
+          const wantsTree = treeIndexes.length > 0 && Math.random() < 0.42;
+          if (wantsTree) {
+            flock.targetIndex = treeIndexes[Math.floor(Math.random() * treeIndexes.length)];
+          } else {
+            for (let attempt = 0; attempt < flock.landingPoints.length; attempt++) {
+              const pointOffset = 1 + Math.floor(Math.random() * (flock.landingPoints.length - 1));
+              const candidateIndex = (flock.targetIndex + pointOffset) % flock.landingPoints.length;
+              const candidate = flock.landingPoints[candidateIndex];
+              if (candidate.y > 1 || !isBlocked(candidate.x, candidate.z, 1.35, true)) {
+                flock.targetIndex = candidateIndex;
+                break;
+              }
+            }
+          }
+          landingPoint = flock.landingPoints[flock.targetIndex];
           flock.state = "flying";
           flock.members.forEach((member) => {
             member.airborne = true;
@@ -5433,20 +5504,18 @@ export default function SecurityConsoleGame() {
         } else if (
           flock.state === "flying" &&
           flock.members.every((member) => {
-            const target = flock.landingPoints[flock.targetIndex].clone().add(member.flockOffset);
+            const target = birdLandingTarget(flock, member);
             return Math.hypot(member.mesh.position.x - target.x, member.mesh.position.z - target.z) < 2.4;
           })
         ) {
           flock.state = "landing";
-        } else if (flock.state === "landing" && flock.members.every((member) => member.mesh.position.y < 0.16)) {
-          flock.state = "ground";
+        } else if (flock.state === "landing" && flock.members.every((member) => member.mesh.position.distanceTo(birdLandingTarget(flock, member)) < 0.2)) {
+          flock.state = landingPoint.y > 1 ? "perched" : "ground";
           flock.nextStateAt = now + 6500 + Math.random() * 8500;
-          flock.members.forEach((member, memberIndex) => {
+          flock.members.forEach((member) => {
             member.airborne = false;
-            member.mesh.position.y = 0;
-            member.flightTarget.copy(landingPoint).add(member.flockOffset);
-            member.flightTarget.x += Math.sin(memberIndex * 2.1) * 2.2;
-            member.flightTarget.z += Math.cos(memberIndex * 1.7) * 2.2;
+            member.mesh.position.copy(birdLandingTarget(flock, member));
+            member.flightTarget.copy(member.mesh.position);
             member.flightPauseUntil = now + 800 + Math.random() * 1800;
           });
         }
@@ -5505,15 +5574,17 @@ export default function SecurityConsoleGame() {
               animal.mesh.rotation.y = Math.atan2(direction.x, direction.z);
             }
             animal.mesh.position.y = 0;
+          } else if (flock.state === "perched") {
+            animal.mesh.position.copy(birdLandingTarget(flock, animal));
+            animal.mesh.rotation.y += Math.sin(animal.phase * 0.7 + animal.id) * dt * 0.08;
           } else {
-            const target = landing.clone().add(animal.flockOffset);
+            const target = birdLandingTarget(flock, animal);
             target.y = flock.state === "flying"
-              ? (animal.kind === "stork" ? 11 + (animal.id % 3) * 1.7 : 6 + (animal.id % 4) * 0.65)
-              : 0;
-            const direction = target.sub(animal.mesh.position);
-            const distance = direction.length();
+              ? Math.max(landing.y + 3.2, animal.kind === "stork" ? 11 + (animal.id % 3) * 1.7 : 6 + (animal.id % 4) * 0.65)
+              : landing.y;
+            const distance = animal.mesh.position.distanceTo(target);
             if (distance > 0.02) {
-              direction.normalize();
+              const direction = birdFlightDirection(animal.mesh.position, target);
               const airSpeed = flock.state === "landing" ? animal.speed * 0.72 : animal.speed;
               animal.mesh.position.addScaledVector(direction, Math.min(distance, airSpeed * dt));
               animal.mesh.rotation.y = Math.atan2(direction.x, direction.z);

@@ -433,7 +433,8 @@ test("uses flat water and non-circular flocking wildlife with village fauna", as
   assert.match(source, /new THREE\.Mesh\(makeFlatRiverGeometry\(curve\), riverMat\)/);
   assert.doesNotMatch(source, /new THREE\.TubeGeometry\(curve/);
   assert.match(source, /type BirdFlockState/);
-  assert.match(source, /Array\.from\(\{ length: 24 \}/);
+  assert.match(source, /Array\.from\(\{ length: 48 \}/);
+  assert.match(source, /\.filter\(\(point\) => !staticLandingBlocked/);
   assert.match(source, /state: "ground" \| "flying" \| "landing"/);
   assert.match(source, /\{ kind: "bird", x: 0, z: 42, count: 12/);
   assert.match(source, /animal\.frightenedUntil = now \+ 4200/);
@@ -467,6 +468,18 @@ test("uses rounded feathered bird wings instead of triangular bat silhouettes", 
   assert.match(source, /const head = new THREE\.Mesh\(new THREE\.SphereGeometry/);
   assert.match(source, /birdLeftLeg/);
   assert.doesNotMatch(source, /new THREE\.ConeGeometry\(kind === "stork" \? 0\.58 : 0\.38/);
+});
+
+test("keeps bird flocks clear of obstacles and lets them perch in trees", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /group\.userData\.birdPerch = new THREE\.Vector3/);
+  assert.match(source, /const treePerches: THREE\.Vector3\[\] = \[\]/);
+  assert.match(source, /state: "ground" \| "flying" \| "landing" \| "perched"/);
+  assert.match(source, /const birdFlightDirection =/);
+  assert.match(source, /isBlocked\(x, z, 1\.35, true\)/);
+  assert.match(source, /Math\.random\(\) < 0\.42/);
+  assert.match(source, /flock\.state === "perched"/);
 });
 
 test("adds traffic yielding, bus stop requests, zero-start economy, and residents for every house", async () => {
