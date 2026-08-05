@@ -458,6 +458,17 @@ test("adds denser housing, two active construction sites, and faster bird flight
   assert.match(source, /id: "urgent-generator"/);
 });
 
+test("uses rounded feathered bird wings instead of triangular bat silhouettes", async () => {
+  const source = await readFile(sourceUrl, "utf8");
+
+  assert.match(source, /const wing = new THREE\.Group\(\)/);
+  assert.match(source, /new THREE\.SphereGeometry\(0\.18, 8, 5\)/);
+  assert.match(source, /feather\.name = `wingFeather\$\{featherIndex\}`/);
+  assert.match(source, /const head = new THREE\.Mesh\(new THREE\.SphereGeometry/);
+  assert.match(source, /birdLeftLeg/);
+  assert.doesNotMatch(source, /new THREE\.ConeGeometry\(kind === "stork" \? 0\.58 : 0\.38/);
+});
+
 test("adds traffic yielding, bus stop requests, zero-start economy, and residents for every house", async () => {
   const source = await readFile(sourceUrl, "utf8");
 
